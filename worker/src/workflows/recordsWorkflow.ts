@@ -1,5 +1,7 @@
-import { proxyActivities, sleep, condition, defineSignal, setHandler, log } from '@temporalio/workflow';
+import { proxyActivities, executeChild, condition, defineSignal, setHandler, log } from '@temporalio/workflow';
 import type * as activities from '../activities';
+import { recordsRetrievalWorkflow } from './recordsRetrievalWorkflow';
+import { RecordsWorkflowParams } from './registry';
 
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
@@ -14,8 +16,29 @@ export interface UserResponse {
 // Define the signal
 export const userResponseSignal = defineSignal<[UserResponse]>('userResponse');
 
-export async function recordsWorkflow(patientCaseId: number) {
-  log.info('Starting records workflow', { patientCaseId });
+export async function recordsWorkflow(
+  patientCaseId: number,
+  params?: Partial<RecordsWorkflowParams>
+) {
+  // Apply defaults
+  const config: RecordsWorkflowParams = {
+    patientOutreach: {
+      maxAttempts: params?.patientOutreach?.maxAttempts ?? 7,
+      waitBetweenAttempts: params?.patientOutreach?.waitBetweenAttempts ?? '1 day',
+      smsTemplate: params?.patientOutreach?.smsTemplate ?? 'Please call us back to discuss your medical records.',
+    },
+    recordsRetrieval: {
+      followUpEnabled: params?.recordsRetrieval?.followUpEnabled ?? false,
+      followUpInterval: params?.recordsRetrieval?.followUpInterval ?? '3 days',
+      maxFollowUps: params?.recordsRetrieval?.maxFollowUps ?? 2,
+    },
+    call: {
+      agentId: params?.call?.agentId,
+      maxDuration: params?.call?.maxDuration ?? 300,
+    },
+  };
+
+  log.info('Starting records workflow', { patientCaseId, params: config });
 
   let pickedUp = false;
   let userResponded: UserResponse | null = null;
@@ -26,13 +49,16 @@ export async function recordsWorkflow(patientCaseId: number) {
     userResponded = response;
   });
 
-  // 1️⃣ Try to reach the customer (SMS + call, up to 7 times)
-  log.info('Phase 1: Attempting to reach patient', { patientCaseId, maxAttempts: 7 });
+  // 1️⃣ Try to reach the customer (SMS + call, up to maxAttempts)
+  log.info('Phase 1: Attempting to reach patient', {
+    patientCaseId,
+    maxAttempts: config.patientOutreach.maxAttempts,
+  });
 
-  for (let i = 0; i < 7 && !pickedUp && !userResponded; i++) {
-    log.info(`Attempt ${i + 1}/7 to reach patient`, { patientCaseId });
+  for (let i = 0; i < config.patientOutreach.maxAttempts && !pickedUp && !userResponded; i++) {
+    log.info(`Attempt ${i + 1}/${config.patientOutreach.maxAttempts} to reach patient`, { patientCaseId });
 
-    await a.sendSMS(patientCaseId, "Please call us back");
+    await a.sendSMS(patientCaseId, config.patientOutreach.smsTemplate);
     pickedUp = await a.placeCall(patientCaseId);
 
     if (pickedUp) {
@@ -40,13 +66,18 @@ export async function recordsWorkflow(patientCaseId: number) {
       break;
     }
 
-    // Wait 1 day, but interrupt early if user responds
-    log.info('Waiting 1 day before next attempt', { patientCaseId, attempt: i + 1 });
-    await condition(() => userResponded !== null, '1 day');
+    // Wait between attempts, but interrupt early if user responds
+    if (i < config.patientOutreach.maxAttempts - 1) { // Don't wait after last attempt
+      log.info(`Waiting ${config.patientOutreach.waitBetweenAttempts} before next attempt`, {
+        patientCaseId,
+        attempt: i + 1,
+      });
+      await condition(() => userResponded !== null, config.patientOutreach.waitBetweenAttempts);
 
-    if (userResponded) {
-      log.info('Wait interrupted by user response', { patientCaseId });
-      break;
+      if (userResponded) {
+        log.info('Wait interrupted by user response', { patientCaseId });
+        break;
+      }
     }
   }
 
@@ -75,44 +106,24 @@ export async function recordsWorkflow(patientCaseId: number) {
   const providers = await a.extractProviders(analysis);
   log.info('Providers extracted', { patientCaseId, providerCount: providers.length, providers });
 
-  // 4️⃣ Parallelize provider subflows
+  // 4️⃣ Parallelize provider subflows using child workflows
   log.info('Phase 3: Processing provider records requests', { patientCaseId, providerCount: providers.length });
 
-  await Promise.all(providers.map(async (provider, index) => {
-    log.info(`Processing provider ${index + 1}/${providers.length}`, { patientCaseId, provider });
+  const retrievalResults = await Promise.all(
+    providers.map((provider, index) => {
+      log.info(`Starting records retrieval for provider ${index + 1}/${providers.length}`, {
+        patientCaseId,
+        provider,
+      });
 
-    const requestId = await a.createRecordsRequest(provider);
-    log.info('Records request created', { patientCaseId, provider, requestId });
+      return executeChild(recordsRetrievalWorkflow, {
+        workflowId: `records-retrieval-${patientCaseId}-${provider.replace(/\s/g, '-')}-${Date.now()}`,
+        args: [patientCaseId, provider, config.recordsRetrieval],
+      });
+    })
+  );
 
-    await a.waitForSignature(requestId);
-    log.info('Signature received', { patientCaseId, provider, requestId });
-
-    const contact = await a.findDoctorOffice(provider);
-    log.info('Doctor office contact found', { patientCaseId, provider, contact });
-
-    const verified = await a.manualVerify(contact);
-    if (!verified) {
-      log.error('Verification failed', { patientCaseId, provider, contact });
-      throw new Error('Verification failed for ' + provider);
-    }
-    log.info('Contact verified', { patientCaseId, provider });
-
-    if (contact.method === 'fax') {
-      log.info('Sending fax', { patientCaseId, provider });
-      await a.sendFax(contact, requestId);
-    } else {
-      log.info('Sending email', { patientCaseId, provider });
-      await a.sendEmail(contact, requestId);
-    }
-
-    log.info('Waiting for records', { patientCaseId, provider });
-    await a.waitForRecords(provider);
-
-    log.info('Ingesting records', { patientCaseId, provider });
-    await a.ingestRecords(provider);
-
-    log.info(`Provider ${index + 1}/${providers.length} completed`, { patientCaseId, provider });
-  }));
+  log.info('All provider records retrieved', { patientCaseId, providerCount: providers.length, retrievalResults });
 
   log.info('Phase 4: Running downstream analysis', { patientCaseId });
   await a.downstreamAnalysis(patientCaseId);

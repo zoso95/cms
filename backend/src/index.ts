@@ -4,14 +4,43 @@ import { config } from 'dotenv';
 import { supabase } from './db';
 import { getTemporalClient } from './temporal';
 import { v4 as uuidv4 } from 'uuid';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
 
 config();
 
 const app = express();
+const httpServer = createServer(app);
+const io = new SocketIOServer(httpServer, {
+  cors: {
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST'],
+  },
+});
+
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+
+// Socket.io connection handling
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+
+  socket.on('subscribe-patient-case', (patientCaseId: number) => {
+    console.log(`Client ${socket.id} subscribed to patient case ${patientCaseId}`);
+    socket.join(`patient-case-${patientCaseId}`);
+  });
+
+  socket.on('unsubscribe-patient-case', (patientCaseId: number) => {
+    console.log(`Client ${socket.id} unsubscribed from patient case ${patientCaseId}`);
+    socket.leave(`patient-case-${patientCaseId}`);
+  });
+});
 
 // ============================================
 // Patient Cases Routes
@@ -82,10 +111,135 @@ app.get('/api/patient-cases/:id', async (req, res) => {
 // Workflow Routes
 // ============================================
 
+// Get available workflows catalog
+app.get('/api/workflows/catalog', async (req, res) => {
+  try {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+
+    // Read the registry file and extract workflow metadata
+    const registryPath = path.join(__dirname, '../../worker/src/workflows/registry.ts');
+    const registryContent = await fs.readFile(registryPath, 'utf-8');
+
+    // Simple workflow metadata (hardcoded for reliability)
+    const workflows = [
+      {
+        name: 'recordsWorkflow',
+        displayName: 'Medical Records Retrieval',
+        description: 'Full workflow for contacting patients, collecting transcripts, and requesting medical records from providers',
+        category: 'production',
+        defaultParams: {
+          patientOutreach: {
+            maxAttempts: 7,
+            waitBetweenAttempts: '1 day',
+            smsTemplate: 'Please call us back to discuss your medical records.',
+          },
+          recordsRetrieval: {
+            followUpEnabled: false,
+            followUpInterval: '3 days',
+            maxFollowUps: 2,
+          },
+          call: {
+            maxDuration: 300,
+          },
+        },
+      },
+      {
+        name: 'patientOutreachWorkflow',
+        displayName: 'Patient Outreach',
+        description: 'Contact patient via SMS and calls until they respond or max attempts reached',
+        category: 'production',
+        defaultParams: {
+          maxAttempts: 7,
+          waitBetweenAttempts: '1 day',
+          smsTemplate: 'Please call us back to discuss your medical records.',
+        },
+      },
+      {
+        name: 'testSMSWorkflow',
+        displayName: 'Test SMS',
+        description: 'Send a test SMS to a patient',
+        category: 'test',
+        defaultParams: {
+          message: 'Test message from Afterimage',
+        },
+      },
+      {
+        name: 'testCallWorkflow',
+        displayName: 'Test Call',
+        description: 'Place a test call to a patient',
+        category: 'test',
+        defaultParams: {
+          maxDuration: 300,
+        },
+      },
+      {
+        name: 'testFaxWorkflow',
+        displayName: 'Test Fax',
+        description: 'Send a test fax to a number',
+        category: 'test',
+        defaultParams: {
+          faxNumber: '',
+          message: 'Test fax',
+        },
+      },
+      {
+        name: 'testEmailWorkflow',
+        displayName: 'Test Email',
+        description: 'Send a test email',
+        category: 'test',
+        defaultParams: {
+          to: '',
+          subject: 'Test email',
+          body: 'This is a test email',
+        },
+      },
+    ];
+
+    res.json(workflows);
+  } catch (error: any) {
+    console.error('Error loading workflow catalog:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get workflow source code
+app.get('/api/workflows/:workflowName/source', async (req, res) => {
+  try {
+    const { workflowName } = req.params;
+    const fs = await import('fs/promises');
+    const path = await import('path');
+
+    // Map workflow names to file paths
+    const workflowFiles: Record<string, string> = {
+      recordsWorkflow: 'recordsWorkflow.ts',
+      patientOutreachWorkflow: 'patientOutreachWorkflow.ts',
+      recordsRetrievalWorkflow: 'recordsRetrievalWorkflow.ts',
+      testSMSWorkflow: 'testWorkflows.ts',
+      testCallWorkflow: 'testWorkflows.ts',
+      testFaxWorkflow: 'testWorkflows.ts',
+      testEmailWorkflow: 'testWorkflows.ts',
+    };
+
+    const fileName = workflowFiles[workflowName];
+    if (!fileName) {
+      return res.status(404).json({ error: 'Workflow not found' });
+    }
+
+    const filePath = path.join(__dirname, '../../worker/src/workflows', fileName);
+    const source = await fs.readFile(filePath, 'utf-8');
+
+    res.json({ workflowName, source });
+  } catch (error: any) {
+    console.error('Error reading workflow source:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start workflow for a patient case
 app.post('/api/workflows/start', async (req, res) => {
   try {
-    const { patientCaseId } = req.body;
+    const { patientCaseId, workflowName = 'recordsWorkflow', parameters = {} } = req.body;
 
     if (!patientCaseId) {
       return res.status(400).json({ error: 'patientCaseId is required' });
@@ -104,7 +258,7 @@ app.post('/api/workflows/start', async (req, res) => {
     }
 
     const client = await getTemporalClient();
-    const workflowId = `records-workflow-${patientCaseId}-${Date.now()}`;
+    const workflowId = `${workflowName}-${patientCaseId}-${Date.now()}`;
 
     // Create workflow execution record
     const { data: execution, error: execError } = await supabase
@@ -115,16 +269,29 @@ app.post('/api/workflows/start', async (req, res) => {
         workflow_id: workflowId,
         run_id: '', // Will be updated when we get the run ID
         status: 'running',
+        workflow_name: workflowName,
+        workflow_parameters: parameters,
       })
       .select()
       .single();
 
     if (execError) throw execError;
 
+    // Prepare workflow args based on workflow type
+    let args: any[] = [patientCaseId];
+    if (workflowName === 'recordsWorkflow') {
+      args = [patientCaseId, parameters];
+    } else if (workflowName.startsWith('test')) {
+      args = [patientCaseId, parameters];
+    } else {
+      // For other workflows, include parameters
+      args = [patientCaseId, parameters];
+    }
+
     // Start the workflow
-    const handle = await client.workflow.start('recordsWorkflow', {
+    const handle = await client.workflow.start(workflowName, {
       taskQueue: 'records-workflow',
-      args: [patientCaseId],
+      args,
       workflowId,
     });
 
@@ -393,11 +560,88 @@ app.get('/health', (req, res) => {
 });
 
 // ============================================
+// Workflow Monitor
+// ============================================
+
+// Monitor running workflows and emit updates when they complete
+async function monitorWorkflows() {
+  try {
+    const { data: runningWorkflows } = await supabase
+      .from('workflow_executions')
+      .select('*')
+      .eq('status', 'running');
+
+    if (!runningWorkflows || runningWorkflows.length === 0) {
+      return;
+    }
+
+    const client = await getTemporalClient();
+
+    for (const execution of runningWorkflows) {
+      try {
+        const handle = client.workflow.getHandle(execution.workflow_id);
+        const description = await handle.describe();
+
+        // Check if workflow completed
+        if (description.status.name !== 'RUNNING') {
+          const newStatus = description.status.name.toLowerCase();
+
+          // Get failure information if workflow failed
+          let errorMessage = null;
+          if (newStatus === 'failed' || newStatus === 'terminated') {
+            try {
+              const result = await handle.result();
+            } catch (err: any) {
+              errorMessage = err.message || 'Unknown error';
+            }
+          }
+
+          // Update database
+          const updateData: any = {
+            status: newStatus,
+            completed_at: new Date().toISOString(),
+          };
+
+          if (errorMessage) {
+            updateData.error = errorMessage;
+          }
+
+          await supabase
+            .from('workflow_executions')
+            .update(updateData)
+            .eq('id', execution.id);
+
+          // Emit socket event to all clients subscribed to this patient case
+          io.to(`patient-case-${execution.patient_case_id}`).emit('workflow-updated', {
+            executionId: execution.id,
+            workflowId: execution.workflow_id,
+            patientCaseId: execution.patient_case_id,
+            status: newStatus,
+            completedAt: new Date().toISOString(),
+            error: errorMessage,
+          });
+
+          console.log(`Workflow ${execution.workflow_id} completed with status ${newStatus}${errorMessage ? `: ${errorMessage}` : ''}`);
+        }
+      } catch (error) {
+        console.error(`Error checking workflow ${execution.workflow_id}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('Error monitoring workflows:', error);
+  }
+}
+
+// Start monitoring (check every 2 seconds)
+setInterval(monitorWorkflows, 2000);
+
+// ============================================
 // Start Server
 // ============================================
 
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`🚀 Backend API running on http://localhost:${PORT}`);
+  console.log(`🔌 WebSocket server ready`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`   Temporal: ${process.env.TEMPORAL_ADDRESS || 'localhost:7233'}`);
 });

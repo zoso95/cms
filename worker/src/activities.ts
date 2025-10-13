@@ -307,11 +307,13 @@ export async function ingestRecords(providerName: string): Promise<void> {
 export async function downstreamAnalysis(patientCaseId: number): Promise<void> {
   console.log(`[Activity] Running downstream analysis for patient case ${patientCaseId}`);
 
+  /*
   // Update patient case status to completed
   await supabase
     .from('patient_cases')
     .update({ status: 'completed' })
     .eq('id', patientCaseId);
+  */
 
   // In a real implementation, trigger downstream workflows
   await new Promise(resolve => setTimeout(resolve, 100));
@@ -320,10 +322,12 @@ export async function downstreamAnalysis(patientCaseId: number): Promise<void> {
 export async function logFailure(patientCaseId: number, reason: string): Promise<void> {
   console.log(`[Activity] Logging failure for patient case ${patientCaseId}: ${reason}`);
 
+  /*
   await supabase
     .from('patient_cases')
     .update({ status: 'failed' })
     .eq('id', patientCaseId);
+  */
 
   const workflowExecutionId = await getWorkflowExecutionIdFromDb(patientCaseId);
 

@@ -24,10 +24,12 @@ export const api = {
   getPatientCase: (id: string) => apiRequest<any>(`/patient-cases/${id}`),
 
   // Workflows
-  startWorkflow: (patientCaseId: number) =>
+  getWorkflowCatalog: () => apiRequest<any[]>('/workflows/catalog'),
+  getWorkflowSource: (workflowName: string) => apiRequest<{ workflowName: string; source: string }>(`/workflows/${workflowName}/source`),
+  startWorkflow: (patientCaseId: number, workflowName?: string, parameters?: any) =>
     apiRequest<{ workflowId: string; runId: string; executionId: string }>('/workflows/start', {
       method: 'POST',
-      body: JSON.stringify({ patientCaseId }),
+      body: JSON.stringify({ patientCaseId, workflowName, parameters }),
     }),
   stopWorkflow: (workflowId: string) =>
     apiRequest<{ success: boolean }>(`/workflows/${workflowId}/stop`, {

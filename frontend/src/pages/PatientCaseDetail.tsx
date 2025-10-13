@@ -1,12 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import WorkflowSelector from '../components/WorkflowSelector';
+import { getSocket, subscribeToPatientCase, unsubscribeFromPatientCase } from '../lib/socket';
 
 export default function PatientCaseDetail() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<'workflows' | 'communications' | 'providers' | 'transcripts'>('workflows');
+  const [showWorkflowSelector, setShowWorkflowSelector] = useState(false);
 
   const { data: patientCase, isLoading: caseLoading } = useQuery({
     queryKey: ['patient-case', id],
@@ -39,10 +42,12 @@ export default function PatientCaseDetail() {
   });
 
   const startWorkflowMutation = useMutation({
-    mutationFn: () => api.startWorkflow(Number(id)),
+    mutationFn: ({ workflowName, parameters }: { workflowName: string; parameters: any }) =>
+      api.startWorkflow(Number(id), workflowName, parameters),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['patient-case-workflows', id] });
       queryClient.invalidateQueries({ queryKey: ['patient-case', id] });
+      setShowWorkflowSelector(false);
     },
   });
 
@@ -61,6 +66,37 @@ export default function PatientCaseDetail() {
     },
   });
 
+  // WebSocket subscription for real-time updates
+  useEffect(() => {
+    if (!id) return;
+
+    const patientCaseId = Number(id);
+    const socket = getSocket();
+
+    // Subscribe to this patient case
+    subscribeToPatientCase(patientCaseId);
+
+    // Listen for workflow updates
+    const handleWorkflowUpdate = (data: any) => {
+      console.log('Workflow updated:', data);
+
+      // Invalidate queries to refetch fresh data
+      queryClient.invalidateQueries({ queryKey: ['patient-case-workflows', id] });
+      queryClient.invalidateQueries({ queryKey: ['patient-case', id] });
+      queryClient.invalidateQueries({ queryKey: ['patient-case-communications', id] });
+      queryClient.invalidateQueries({ queryKey: ['patient-case-providers', id] });
+      queryClient.invalidateQueries({ queryKey: ['patient-case-transcripts', id] });
+    };
+
+    socket.on('workflow-updated', handleWorkflowUpdate);
+
+    // Cleanup on unmount
+    return () => {
+      socket.off('workflow-updated', handleWorkflowUpdate);
+      unsubscribeFromPatientCase(patientCaseId);
+    };
+  }, [id, queryClient]);
+
   if (caseLoading) {
     return <div style={{ textAlign: 'center', padding: '3rem' }}>Loading...</div>;
   }
@@ -71,6 +107,16 @@ export default function PatientCaseDetail() {
 
   return (
     <div>
+      {showWorkflowSelector && (
+        <WorkflowSelector
+          patientCaseId={Number(id)}
+          onStart={(workflowName, parameters) => {
+            startWorkflowMutation.mutate({ workflowName, parameters });
+          }}
+          onCancel={() => setShowWorkflowSelector(false)}
+        />
+      )}
+
       <Link to="/" style={{ color: '#2563eb', textDecoration: 'none', fontSize: '0.875rem', marginBottom: '1rem', display: 'inline-block' }}>
         ← Back to Dashboard
       </Link>
@@ -108,7 +154,7 @@ export default function PatientCaseDetail() {
             </div>
           </div>
           <button
-            onClick={() => startWorkflowMutation.mutate()}
+            onClick={() => setShowWorkflowSelector(true)}
             disabled={startWorkflowMutation.isPending}
             style={{
               backgroundColor: '#2563eb',
@@ -185,6 +231,22 @@ export default function PatientCaseDetail() {
                           Completed: {new Date(workflow.completed_at).toLocaleString()}
                         </p>
                       )}
+                      {workflow.error && (
+                        <div style={{
+                          marginTop: '0.5rem',
+                          padding: '0.5rem',
+                          backgroundColor: '#fee',
+                          border: '1px solid #fcc',
+                          borderRadius: '4px',
+                        }}>
+                          <p style={{ fontSize: '0.75rem', fontWeight: '500', color: '#c00', marginBottom: '0.25rem' }}>
+                            Error:
+                          </p>
+                          <p style={{ fontSize: '0.75rem', color: '#600', whiteSpace: 'pre-wrap' }}>
+                            {workflow.error}
+                          </p>
+                        </div>
+                      )}
                       <a
                         href={`http://localhost:8233/namespaces/default/workflows/${workflow.workflow_id}/${workflow.run_id}`}
                         target="_blank"
@@ -205,7 +267,12 @@ export default function PatientCaseDetail() {
                       borderRadius: '9999px',
                       fontSize: '0.75rem',
                       fontWeight: '500',
-                      backgroundColor: workflow.status === 'running' ? '#3b82f6' : workflow.status === 'completed' ? '#10b981' : '#ef4444',
+                      backgroundColor:
+                        workflow.status === 'running' ? '#3b82f6' :
+                        workflow.status === 'completed' ? '#10b981' :
+                        workflow.status === 'failed' ? '#ef4444' :
+                        workflow.status === 'terminated' ? '#f97316' :
+                        '#6b7280',
                       color: '#fff'
                     }}>
                       {workflow.status}
