@@ -1,0 +1,22 @@
+{
+  "name": "afterimage-cms",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "worker",
+    "backend",
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "dev:worker": "npm run dev --workspace=worker",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.3"
+  }
+}
