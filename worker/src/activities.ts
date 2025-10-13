@@ -3,6 +3,8 @@ import { supabase } from './db';
 import { v4 as uuidv4 } from 'uuid';
 import twilio from 'twilio';
 import nodemailer from 'nodemailer';
+import { openphone } from './services/openphone';
+import { normalizePhoneNumber } from './utils/phone';
 
 // Lazy-initialize Twilio client
 let twilioClient: ReturnType<typeof twilio> | null = null;
@@ -86,7 +88,13 @@ async function getWorkflowExecutionIdFromDb(patientCaseId: number): Promise<stri
 // ============================================
 // SMS Activities
 // ============================================
-export async function sendSMS(patientCaseId: number, message: string): Promise<void> {
+
+/**
+ * Send SMS to patient
+ * @returns OpenPhone message ID
+ * @throws Error if SMS fails to send
+ */
+export async function sendSMS(patientCaseId: number, message: string): Promise<string> {
   console.log(`[Activity] Sending SMS to patient case ${patientCaseId}: ${message}`);
 
   // Get patient phone from database
@@ -99,17 +107,24 @@ export async function sendSMS(patientCaseId: number, message: string): Promise<v
   if (caseError) throw caseError;
   if (!patientCase.phone) throw new Error('No phone number for patient case');
 
-  // MOCKED: Skip actual Twilio call for now
-  console.log(`[MOCK] Would send SMS to ${patientCase.phone}: ${message}`);
+  // Normalize phone number to E.164 format for OpenPhone
+  const normalizedPhone = normalizePhoneNumber(patientCase.phone);
+  console.log(`[Activity] Normalized phone: ${patientCase.phone} → ${normalizedPhone}`);
 
+  // Send via OpenPhone
+  const messageId = await openphone.sendSMSToNumber(normalizedPhone, message);
+
+  // Log to database
   await logCommunication(
     patientCaseId,
     'sms',
     'outbound',
     'sent',
     message,
-    { mocked: true, phone: patientCase.phone }
+    { openphone_message_id: messageId, phone: normalizedPhone, original_phone: patientCase.phone }
   );
+
+  return messageId;
 }
 
 // ============================================
