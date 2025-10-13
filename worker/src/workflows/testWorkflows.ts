@@ -49,8 +49,8 @@ export async function testFaxWorkflow(
 
   // Create a mock contact for fax testing
   const mockContact = {
-    method: 'fax' as const,
-    value: params.faxNumber,
+    name: 'Test Fax Recipient',
+    contact: params.faxNumber,
   };
 
   await a.sendFax(mockContact, `test-fax-${Date.now()}`);
@@ -71,8 +71,8 @@ export async function testEmailWorkflow(
 
   // Create a mock contact for email testing
   const mockContact = {
-    method: 'email' as const,
-    value: params.to,
+    name: 'Test Email Recipient',
+    contact: params.to,
   };
 
   await a.sendEmail(mockContact, `test-email-${Date.now()}`);

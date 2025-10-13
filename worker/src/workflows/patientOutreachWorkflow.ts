@@ -57,7 +57,7 @@ export async function patientOutreachWorkflow(
     // Wait between attempts, but interrupt early if user responds
     if (i < params.maxAttempts - 1) { // Don't wait after last attempt
       log.info(`Waiting ${params.waitBetweenAttempts} before next attempt`, { patientCaseId, attempt: i + 1 });
-      await condition(() => userResponded !== null, params.waitBetweenAttempts);
+      await condition(() => userResponded !== null, params.waitBetweenAttempts as any);
 
       if (userResponded) {
         log.info('Wait interrupted by user response', { patientCaseId });

@@ -54,7 +54,7 @@ export class OpenPhoneClient {
       body: JSON.stringify(requestPayload),
     });
 
-    const responseData = await response.json();
+    const responseData = await response.json() as any;
 
     if (!response.ok) {
       console.error('❌ [OPENPHONE] API error:', response.status, responseData);

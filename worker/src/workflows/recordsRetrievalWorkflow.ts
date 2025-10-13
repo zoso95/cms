@@ -76,7 +76,7 @@ export async function recordsRetrievalWorkflow(
         });
 
         // Wait before follow-up
-        await sleep(params.followUpInterval);
+        await sleep(params.followUpInterval as any);
 
         // Send follow-up request
         if (contact.method === 'fax') {

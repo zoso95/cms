@@ -72,7 +72,7 @@ export async function recordsWorkflow(
         patientCaseId,
         attempt: i + 1,
       });
-      await condition(() => userResponded !== null, config.patientOutreach.waitBetweenAttempts);
+      await condition(() => userResponded !== null, config.patientOutreach.waitBetweenAttempts as any);
 
       if (userResponded) {
         log.info('Wait interrupted by user response', { patientCaseId });
@@ -82,9 +82,10 @@ export async function recordsWorkflow(
   }
 
   // 2️⃣ Branch logic
-  if (userResponded) {
+  if (userResponded !== null) {
+    const response = userResponded as UserResponse;
     log.info('Patient responded - scheduling callback', { patientCaseId });
-    await a.scheduleCall(patientCaseId, userResponded.message);
+    await a.scheduleCall(patientCaseId, response.message);
     return { success: true, reason: 'user_responded' };
   }
 
