@@ -41,6 +41,7 @@ export const api = {
     }),
   getWorkflow: (workflowId: string) => apiRequest<any>(`/workflows/${workflowId}`),
   getPatientCaseWorkflows: (id: string) => apiRequest<any[]>(`/patient-cases/${id}/workflows`),
+  getChildWorkflows: (workflowId: string) => apiRequest<any[]>(`/workflows/${workflowId}/children`),
   sendSignal: (workflowId: string, signalName: string, signalArgs: any[]) =>
     apiRequest<{ success: boolean }>(`/workflows/${workflowId}/signal`, {
       method: 'POST',

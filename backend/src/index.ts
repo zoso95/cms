@@ -504,7 +504,7 @@ app.post('/api/workflows/start', async (req, res) => {
         run_id: '', // Will be updated when we get the run ID
         status: 'running',
         workflow_name: workflowName,
-        workflow_parameters: parameters,
+        parameters: parameters,
       })
       .select()
       .single();
@@ -557,9 +557,17 @@ app.get('/api/workflows/:workflowId', async (req, res) => {
   try {
     const { workflowId } = req.params;
 
+    // Get workflow status from Temporal
     const client = await getTemporalClient();
     const handle = client.workflow.getHandle(workflowId);
     const description = await handle.describe();
+
+    // Get additional metadata from database (includes hierarchy info)
+    const { data: dbRecord } = await supabase
+      .from('workflow_executions')
+      .select('*')
+      .eq('workflow_id', workflowId)
+      .maybeSingle();
 
     res.json({
       workflowId: description.workflowId,
@@ -567,6 +575,15 @@ app.get('/api/workflows/:workflowId', async (req, res) => {
       status: description.status.name,
       startTime: description.startTime,
       closeTime: description.closeTime,
+      // Include database metadata if available
+      ...(dbRecord && {
+        patientCaseId: dbRecord.patient_case_id,
+        parentWorkflowId: dbRecord.parent_workflow_id,
+        entityType: dbRecord.entity_type,
+        entityId: dbRecord.entity_id,
+        workflowName: dbRecord.workflow_name,
+        parameters: dbRecord.parameters,
+      }),
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -585,6 +602,25 @@ app.get('/api/patient-cases/:id/workflows', async (req, res) => {
     if (error) throw error;
 
     res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get child workflows for a parent workflow
+app.get('/api/workflows/:workflowId/children', async (req, res) => {
+  try {
+    const { workflowId } = req.params;
+
+    const { data, error } = await supabase
+      .from('workflow_executions')
+      .select('*')
+      .eq('parent_workflow_id', workflowId)
+      .order('started_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(data || []);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -816,6 +852,14 @@ async function monitorWorkflows() {
         const handle = client.workflow.getHandle(execution.workflow_id);
         const description = await handle.describe();
 
+        // Update run_id if it's missing (for child workflows registered before starting)
+        if (!execution.run_id && description.runId) {
+          await supabase
+            .from('workflow_executions')
+            .update({ run_id: description.runId })
+            .eq('id', execution.id);
+        }
+
         // Check if workflow completed
         if (description.status.name !== 'RUNNING') {
           const newStatus = description.status.name.toLowerCase();
@@ -838,6 +882,11 @@ async function monitorWorkflows() {
 
           if (errorMessage) {
             updateData.error = errorMessage;
+          }
+
+          // Also update run_id if we didn't have it before
+          if (!execution.run_id && description.runId) {
+            updateData.run_id = description.runId;
           }
 
           await supabase

@@ -46,8 +46,18 @@ export async function endToEndWorkflow(
   // ============================================
   log.info('Phase 1: Patient Outreach', { patientCaseId });
 
+  // Register child workflow before starting it
+  const outreachWorkflowId = `patient-outreach-${patientCaseId}-${Date.now()}`;
+  await a.registerChildWorkflow({
+    workflowId: outreachWorkflowId,
+    workflowName: 'patientOutreachWorkflow',
+    patientCaseId,
+    parameters: config.patientOutreach,
+  });
+
+  // Start the child workflow
   const outreachResult = await executeChild(patientOutreachWorkflow, {
-    workflowId: `patient-outreach-${patientCaseId}-${Date.now()}`,
+    workflowId: outreachWorkflowId,
     args: [patientCaseId, config.patientOutreach],
   });
 
@@ -78,14 +88,29 @@ export async function endToEndWorkflow(
   log.info('Phase 3: Processing provider records requests', { patientCaseId, providerCount: providers.length });
 
   const retrievalResults = await Promise.all(
-    providers.map((provider, index) => {
+    providers.map(async (provider, index) => {
       log.info(`Starting records retrieval for provider ${index + 1}/${providers.length}`, {
         patientCaseId,
         provider,
       });
 
+      // Register child workflow before starting it
+      const retrievalWorkflowId = `records-retrieval-${patientCaseId}-${provider.replace(/\s/g, '-')}-${Date.now()}`;
+      await a.registerChildWorkflow({
+        workflowId: retrievalWorkflowId,
+        workflowName: 'recordsRetrievalWorkflow',
+        patientCaseId,
+        entityType: 'provider',
+        entityId: provider, // Using provider name as entity ID for now
+        parameters: {
+          provider,
+          ...config.recordsRetrieval,
+        },
+      });
+
+      // Start the child workflow
       return executeChild(recordsRetrievalWorkflow, {
-        workflowId: `records-retrieval-${patientCaseId}-${provider.replace(/\s/g, '-')}-${Date.now()}`,
+        workflowId: retrievalWorkflowId,
         args: [patientCaseId, provider, config.recordsRetrieval],
       });
     })

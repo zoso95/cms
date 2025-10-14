@@ -7,6 +7,7 @@ import { openphone } from './services/openphone';
 import { elevenlabs } from './services/elevenlabs';
 import { normalizePhoneNumber } from './utils/phone';
 import { buildDynamicVariables } from './utils/dynamicVariables';
+import { registerWorkflow, type RegisterWorkflowParams } from './utils/workflowRegistry';
 
 // Lazy-initialize Twilio client
 let twilioClient: ReturnType<typeof twilio> | null = null;
@@ -85,6 +86,30 @@ async function getWorkflowExecutionIdFromDb(patientCaseId: number): Promise<stri
 
   if (error || !data) throw new Error('No running workflow found for patient case');
   return data.id;
+}
+
+// ============================================
+// Workflow Registry Activities
+// ============================================
+
+/**
+ * Register a child workflow in the database
+ *
+ * This should be called BEFORE starting a child workflow to ensure
+ * it's tracked from the moment it begins.
+ */
+export async function registerChildWorkflow(params: RegisterWorkflowParams): Promise<void> {
+  const info = Context.current().info;
+  const parentWorkflowId = info.workflowExecution.workflowId;
+
+  console.log(`[Activity] Registering child workflow: ${params.workflowName}`);
+  console.log(`[Activity]   Parent workflow: ${parentWorkflowId}`);
+  console.log(`[Activity]   Child workflow ID: ${params.workflowId}`);
+
+  await registerWorkflow({
+    ...params,
+    parentWorkflowId,
+  });
 }
 
 // ============================================
