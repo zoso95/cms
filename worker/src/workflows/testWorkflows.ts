@@ -28,13 +28,13 @@ export async function testSMSWorkflow(
 export async function testCallWorkflow(
   patientCaseId: number,
   params: { agentId?: string; maxDuration?: number }
-): Promise<{ success: boolean; pickedUp: boolean }> {
+): Promise<{ success: boolean; conversationId: string }> {
   log.info('Test call workflow started', { patientCaseId, params });
 
-  const pickedUp = await a.placeCall(patientCaseId);
+  const conversationId = await a.placeCall(patientCaseId);
 
-  log.info('Test call workflow completed', { patientCaseId, pickedUp });
-  return { success: true, pickedUp };
+  log.info('Test call workflow completed', { patientCaseId, conversationId });
+  return { success: true, conversationId };
 }
 
 /**

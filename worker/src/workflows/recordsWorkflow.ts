@@ -1,22 +1,23 @@
-import { proxyActivities, executeChild, condition, defineSignal, setHandler, log } from '@temporalio/workflow';
+import { proxyActivities, executeChild, log } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { recordsRetrievalWorkflow } from './recordsRetrievalWorkflow';
+import { patientOutreachWorkflow } from './patientOutreachWorkflow';
 import { RecordsWorkflowParams } from './registry';
 
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
 });
 
-// User response type
-export interface UserResponse {
-  message: string;
-  timestamp: string;
-}
-
-// Define the signal
-export const userResponseSignal = defineSignal<[UserResponse]>('userResponse');
-
-export async function recordsWorkflow(
+/**
+ * End-to-End Medical Records Workflow
+ *
+ * Complete workflow for retrieving medical records:
+ * 1. Patient Outreach - Contact patient via SMS/calls
+ * 2. Transcript Collection & Analysis
+ * 3. Provider Records Retrieval (parallel)
+ * 4. Downstream Analysis
+ */
+export async function endToEndWorkflow(
   patientCaseId: number,
   params?: Partial<RecordsWorkflowParams>
 ) {
@@ -38,64 +39,30 @@ export async function recordsWorkflow(
     },
   };
 
-  log.info('Starting records workflow', { patientCaseId, params: config });
+  log.info('Starting end-to-end medical records workflow', { patientCaseId, params: config });
 
-  let pickedUp = false;
-  let userResponded: UserResponse | null = null;
+  // ============================================
+  // Phase 1: Patient Outreach (via child workflow)
+  // ============================================
+  log.info('Phase 1: Patient Outreach', { patientCaseId });
 
-  // Signal handler: called when a user texts back
-  setHandler(userResponseSignal, (response: UserResponse) => {
-    log.info('User responded via signal', { patientCaseId, response });
-    userResponded = response;
+  const outreachResult = await executeChild(patientOutreachWorkflow, {
+    workflowId: `patient-outreach-${patientCaseId}-${Date.now()}`,
+    args: [patientCaseId, config.patientOutreach],
   });
 
-  // 1️⃣ Try to reach the customer (SMS + call, up to maxAttempts)
-  log.info('Phase 1: Attempting to reach patient', {
-    patientCaseId,
-    maxAttempts: config.patientOutreach.maxAttempts,
-  });
+  log.info('Patient outreach completed', { patientCaseId, outreachResult });
 
-  for (let i = 0; i < config.patientOutreach.maxAttempts && !pickedUp && !userResponded; i++) {
-    log.info(`Attempt ${i + 1}/${config.patientOutreach.maxAttempts} to reach patient`, { patientCaseId });
-
-    await a.sendSMS(patientCaseId, config.patientOutreach.smsTemplate);
-    pickedUp = await a.placeCall(patientCaseId);
-
-    if (pickedUp) {
-      log.info('Patient picked up call', { patientCaseId, attempt: i + 1 });
-      break;
-    }
-
-    // Wait between attempts, but interrupt early if user responds
-    if (i < config.patientOutreach.maxAttempts - 1) { // Don't wait after last attempt
-      log.info(`Waiting ${config.patientOutreach.waitBetweenAttempts} before next attempt`, {
-        patientCaseId,
-        attempt: i + 1,
-      });
-      await condition(() => userResponded !== null, config.patientOutreach.waitBetweenAttempts as any);
-
-      if (userResponded) {
-        log.info('Wait interrupted by user response', { patientCaseId });
-        break;
-      }
-    }
+  // If patient didn't respond and didn't pick up, workflow ends
+  if (!outreachResult.success) {
+    return { success: false, reason: 'no_contact', outreachResult };
   }
 
-  // 2️⃣ Branch logic
-  if (userResponded !== null) {
-    const response = userResponded as UserResponse;
-    log.info('Patient responded - scheduling callback', { patientCaseId });
-    await a.scheduleCall(patientCaseId, response.message);
-    return { success: true, reason: 'user_responded' };
-  }
-
-  if (!pickedUp) {
-    log.warn('Failed to reach patient after 7 days', { patientCaseId });
-    await a.logFailure(patientCaseId, "Could not reach patient after 7 days");
-    return { success: false, reason: 'no_contact' };
-  }
-
-  // 3️⃣ Otherwise continue normal flow
+  // ============================================
+  // Phase 2: Collect and analyze transcript
+  // ============================================
+  // Note: If user texted back, we still continue - they may be trying to opt out
+  // or reschedule (we'll handle those cases later with the transcript analysis)
   log.info('Phase 2: Collecting and analyzing transcript', { patientCaseId });
 
   const transcript = await a.collectTranscript(patientCaseId);

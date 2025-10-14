@@ -1,9 +1,10 @@
-import { Context } from '@temporalio/activity';
+import { Context, ApplicationFailure } from '@temporalio/activity';
 import { supabase } from './db';
 import { v4 as uuidv4 } from 'uuid';
 import twilio from 'twilio';
 import nodemailer from 'nodemailer';
 import { openphone } from './services/openphone';
+import { elevenlabs } from './services/elevenlabs';
 import { normalizePhoneNumber } from './utils/phone';
 
 // Lazy-initialize Twilio client
@@ -130,7 +131,7 @@ export async function sendSMS(patientCaseId: number, message: string): Promise<s
 // ============================================
 // Call Activities
 // ============================================
-export async function placeCall(patientCaseId: number): Promise<boolean> {
+export async function placeCall(patientCaseId: number): Promise<string> {
   console.log(`[Activity] Placing call to patient case ${patientCaseId}`);
 
   const { data: patientCase, error: caseError } = await supabase
@@ -142,20 +143,200 @@ export async function placeCall(patientCaseId: number): Promise<boolean> {
   if (caseError) throw caseError;
   if (!patientCase.phone) throw new Error('No phone number for patient case');
 
-  // MOCKED: Simulate call - randomly pick up or not
-  const pickedUp = Math.random() > 0.8; // 20% chance they pick up
-  console.log(`[MOCK] Would call ${patientCase.phone}: ${pickedUp ? 'PICKED UP' : 'NO ANSWER'}`);
+  // Get workflow execution context
+  const info = Context.current().info;
+  const workflowId = info.workflowExecution.workflowId;
 
+  // Normalize phone number
+  const normalizedPhone = normalizePhoneNumber(patientCase.phone);
+  console.log(`[Activity] Normalized phone: ${patientCase.phone} → ${normalizedPhone}`);
+
+  // Get agent ID from environment (you can make this configurable later)
+  const agentId = process.env.ELEVENLABS_AGENT_ID;
+  if (!agentId) {
+    throw new Error('ELEVENLABS_AGENT_ID not configured');
+  }
+
+  // Initiate call via ElevenLabs
+  console.log(`[Activity] Initiating ElevenLabs call to ${normalizedPhone}...`);
+  const callResult = await elevenlabs.makeCall({
+    toNumber: normalizedPhone,
+    agentId,
+    dynamicVariables: {
+      patient_case_id: patientCaseId.toString(),
+      workflow_id: workflowId,
+    },
+  });
+
+  if (!callResult.success) {
+    // Immediate failure (e.g., HTTP 400 - invalid number, account restrictions, etc.)
+    // This means no conversation was created, so no webhook will arrive
+    console.error(`[Activity] Call initiation failed immediately: ${callResult.error}`);
+
+    // Store failed call record in database
+    const callId = uuidv4();
+    await supabase
+      .from('elevenlabs_calls')
+      .insert({
+        id: callId,
+        patient_case_id: patientCaseId,
+        workflow_id: workflowId,
+        conversation_id: null,
+        call_sid: null,
+        to_number: normalizedPhone,
+        agent_id: agentId,
+        status: 'failed',
+        failure_reason: callResult.error,
+        completed_at: new Date().toISOString(),
+        talked_to_human: false,
+      });
+
+    // Log failed communication
+    await logCommunication(
+      patientCaseId,
+      'call',
+      'outbound',
+      'failed',
+      undefined,
+      {
+        phone: normalizedPhone,
+        error: callResult.error,
+        failure_type: 'immediate_api_failure',
+      }
+    );
+
+    // Throw non-retryable error so Temporal doesn't retry this activity
+    // (retrying would make additional call attempts!)
+    throw ApplicationFailure.nonRetryable(
+      `Call initiation failed: ${callResult.error}`,
+      'CallInitiationError'
+    );
+  }
+
+  console.log(`[Activity] Call initiated! conversation_id: ${callResult.conversationId}`);
+
+  // Store call record in database
+  const { error: insertError } = await supabase
+    .from('elevenlabs_calls')
+    .insert({
+      id: uuidv4(),
+      patient_case_id: patientCaseId,
+      workflow_id: workflowId,
+      conversation_id: callResult.conversationId,
+      call_sid: callResult.callSid,
+      to_number: normalizedPhone,
+      agent_id: agentId,
+      status: 'pending',
+    });
+
+  if (insertError) throw insertError;
+
+  // Log communication
   await logCommunication(
     patientCaseId,
     'call',
     'outbound',
-    pickedUp ? 'received' : 'failed',
+    'pending',  // Use 'pending' instead of 'initiated' to match DB constraint
     undefined,
-    { mocked: true, phone: patientCase.phone, pickedUp }
+    {
+      conversation_id: callResult.conversationId,
+      call_sid: callResult.callSid,
+      phone: normalizedPhone,
+    }
   );
 
-  return pickedUp;
+  // Return conversation ID so workflow can wait for signal
+  return callResult.conversationId!;
+}
+
+export async function checkCallStatus(conversationId: string): Promise<{
+  completed: boolean;
+  talkedToHuman?: boolean;
+  failed?: boolean;
+  failureReason?: string;
+}> {
+  console.log(`[Activity] Checking call status for conversation ${conversationId}`);
+
+  // First check database (webhook may have already updated it)
+  const { data: callRecord } = await supabase
+    .from('elevenlabs_calls')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .single();
+
+  if (!callRecord) {
+    throw new Error(`Call record not found for conversation ${conversationId}`);
+  }
+
+  if (callRecord.status === 'completed') {
+    console.log(`[Activity] Call completed (from database)`, { conversationId, talkedToHuman: callRecord.talked_to_human });
+    return {
+      completed: true,
+      talkedToHuman: callRecord.talked_to_human ?? false,
+    };
+  }
+
+  if (callRecord.status === 'failed') {
+    console.log(`[Activity] Call failed (from database)`, { conversationId, failureReason: callRecord.failure_reason });
+    return {
+      completed: true,
+      failed: true,
+      failureReason: callRecord.failure_reason || 'Unknown error',
+    };
+  }
+
+  // Still pending in database - query ElevenLabs API directly (fallback)
+  console.log(`[Activity] Call still pending in database, querying ElevenLabs API`, { conversationId });
+
+  const apiStatus = await elevenlabs.getConversationStatus(conversationId);
+
+  if (apiStatus.status === 'completed') {
+    console.log(`[Activity] Call completed (from API)`, { conversationId, talkedToHuman: apiStatus.talkedToHuman });
+
+    // Update database with API result
+    await supabase
+      .from('elevenlabs_calls')
+      .update({
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        talked_to_human: apiStatus.talkedToHuman ?? false,
+        transcript: apiStatus.transcript,
+        analysis: apiStatus.analysis,
+      })
+      .eq('conversation_id', conversationId);
+
+    return {
+      completed: true,
+      talkedToHuman: apiStatus.talkedToHuman ?? false,
+    };
+  }
+
+  if (apiStatus.status === 'failed') {
+    console.log(`[Activity] Call failed (from API)`, { conversationId, failureReason: apiStatus.failureReason });
+
+    // Update database with API result
+    await supabase
+      .from('elevenlabs_calls')
+      .update({
+        status: 'failed',
+        completed_at: new Date().toISOString(),
+        failure_reason: apiStatus.failureReason,
+        talked_to_human: false,
+      })
+      .eq('conversation_id', conversationId);
+
+    return {
+      completed: true,
+      failed: true,
+      failureReason: apiStatus.failureReason || 'Unknown error',
+    };
+  }
+
+  // Still pending even in API
+  console.log(`[Activity] Call still pending`, { conversationId });
+  return {
+    completed: false,
+  };
 }
 
 export async function scheduleCall(patientCaseId: number, message: string): Promise<void> {

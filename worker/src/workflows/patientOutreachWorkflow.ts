@@ -14,6 +14,16 @@ export interface UserResponse {
 
 export const userResponseSignal = defineSignal<[UserResponse]>('userResponse');
 
+// Call completion signal
+export interface CallCompletionData {
+  conversationId: string;
+  talkedToHuman: boolean;
+  failed: boolean;
+  failureReason?: string;
+}
+
+export const callCompletedSignal = defineSignal<[CallCompletionData]>('callCompleted');
+
 export interface PatientOutreachResult {
   success: boolean;
   pickedUp: boolean;
@@ -35,6 +45,8 @@ export async function patientOutreachWorkflow(
 
   let pickedUp = false;
   let userResponded: UserResponse | null = null;
+  let attemptCount = 0;
+  let callCompletionData: CallCompletionData | null = null;
 
   // Signal handler: called when a user texts back
   setHandler(userResponseSignal, (response: UserResponse) => {
@@ -42,16 +54,71 @@ export async function patientOutreachWorkflow(
     userResponded = response;
   });
 
+  // Signal handler: called when call completes (from webhook)
+  setHandler(callCompletedSignal, (data: CallCompletionData) => {
+    log.info('Call completed via signal', { patientCaseId, data });
+    callCompletionData = data;
+  });
+
   // Try to reach the customer (SMS + call, up to maxAttempts)
   for (let i = 0; i < params.maxAttempts && !pickedUp && !userResponded; i++) {
+    attemptCount = i + 1;
     log.info(`Attempt ${i + 1}/${params.maxAttempts} to reach patient`, { patientCaseId });
 
     await a.sendSMS(patientCaseId, params.smsTemplate);
-    pickedUp = await a.placeCall(patientCaseId);
 
-    if (pickedUp) {
-      log.info('Patient picked up call', { patientCaseId, attempt: i + 1 });
-      break;
+    // Wait 1 minute before calling to give patient time to see the SMS
+    await sleep('1 minute');
+
+    // Initiate call (non-blocking)
+    const conversationId = await a.placeCall(patientCaseId);
+    log.info('Call initiated, waiting for completion', { patientCaseId, conversationId });
+
+    // Reset call completion data for this attempt
+    callCompletionData = null;
+
+    // Wait for webhook signal (with 30 minute timeout)
+    const signalReceived = await condition(
+      () => callCompletionData !== null && callCompletionData.conversationId === conversationId,
+      '30 minutes'
+    );
+
+    if (signalReceived && callCompletionData) {
+      // Webhook signal received
+      const completionData = callCompletionData as CallCompletionData;
+      log.info('Call result received via webhook', { patientCaseId, data: completionData });
+
+      if (completionData.failed) {
+        log.info('Call failed', { patientCaseId, reason: completionData.failureReason });
+        // Continue to next attempt
+      } else if (completionData.talkedToHuman) {
+        log.info('Patient picked up call', { patientCaseId, attempt: i + 1 });
+        pickedUp = true;
+        break;
+      } else {
+        log.info('Call went to voicemail', { patientCaseId });
+        // Continue to next attempt
+      }
+    } else {
+      // Timeout - webhook didn't arrive, fall back to polling
+      log.warn('Webhook timeout, falling back to API polling', { patientCaseId, conversationId });
+
+      const status = await a.checkCallStatus(conversationId);
+
+      if (status.completed) {
+        if (status.failed) {
+          log.info('Call failed (from polling)', { patientCaseId, reason: status.failureReason });
+        } else if (status.talkedToHuman) {
+          log.info('Patient picked up call (from polling)', { patientCaseId, attempt: i + 1 });
+          pickedUp = true;
+          break;
+        } else {
+          log.info('Call went to voicemail (from polling)', { patientCaseId });
+        }
+      } else {
+        log.warn('Call still not complete after 30 minutes', { patientCaseId, conversationId });
+        // Treat as failure and continue to next attempt
+      }
     }
 
     // Wait between attempts, but interrupt early if user responds
@@ -66,11 +133,24 @@ export async function patientOutreachWorkflow(
     }
   }
 
+  // Handle user response if they texted back
+  if (userResponded !== null) {
+    const response = userResponded as UserResponse;
+    log.info('Patient responded - scheduling callback', { patientCaseId });
+    await a.scheduleCall(patientCaseId, response.message);
+  }
+
+  // Handle no contact after all attempts
+  if (!pickedUp && userResponded === null) {
+    log.warn(`Failed to reach patient after ${params.maxAttempts} attempts`, { patientCaseId });
+    await a.logFailure(patientCaseId, `Could not reach patient after ${params.maxAttempts} attempts`);
+  }
+
   const result: PatientOutreachResult = {
     success: pickedUp || userResponded !== null,
     pickedUp,
     userResponded,
-    attempts: pickedUp ? 0 : params.maxAttempts,
+    attempts: attemptCount,
   };
 
   log.info('Patient outreach workflow completed', { patientCaseId, result });

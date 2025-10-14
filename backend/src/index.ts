@@ -21,6 +21,240 @@ const io = new SocketIOServer(httpServer, {
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
+
+// ElevenLabs webhook route MUST come before express.json() to preserve raw body
+app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), async (req, res) => {
+  try {
+    console.log('🎯 ElevenLabs webhook received!');
+    console.log('📋 Headers:', req.headers);
+
+    // Validate ElevenLabs webhook signature
+    const signature = req.headers['elevenlabs-signature'];
+    if (!signature) {
+      console.error('❌ Missing ElevenLabs-Signature header');
+      return res.status(403).send('Missing signature header');
+    }
+
+    const crypto = require('crypto');
+
+    // Use environment-specific webhook secret
+    const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev';
+    const secret = isDevelopment
+      ? process.env.ELEVENLABS_WEBHOOK_SECRET_DEV
+      : process.env.ELEVENLABS_WEBHOOK_SECRET_PROD;
+
+    if (!secret) {
+      console.error(`❌ Missing webhook secret for ${isDevelopment ? 'development' : 'production'} environment`);
+      console.error(`   Set ELEVENLABS_WEBHOOK_SECRET_${isDevelopment ? 'DEV' : 'PROD'} in .env`);
+      return res.status(500).send('Webhook secret not configured');
+    }
+
+    console.log(`🔐 Using ${isDevelopment ? 'development' : 'production'} webhook secret`);
+
+    // Parse signature header
+    const headers = signature.toString().split(',');
+    const timestampHeader = headers.find((e: string) => e.startsWith('t='));
+    const sigHeader = headers.find((e: string) => e.startsWith('v0='));
+
+    if (!timestampHeader || !sigHeader) {
+      console.error('❌ Invalid signature header format');
+      return res.status(403).send('Invalid signature header format');
+    }
+
+    const timestamp = timestampHeader.substring(2);
+    const sig = sigHeader;
+
+    // Validate timestamp (within 30 minutes)
+    const reqTimestamp = parseInt(timestamp) * 1000;
+    const tolerance = Date.now() - 30 * 60 * 1000;
+    if (reqTimestamp < tolerance) {
+      console.error('❌ Request expired');
+      return res.status(403).send('Request expired');
+    }
+
+    // Validate signature
+    const message = `${timestamp}.${req.body}`;
+    const digest = 'v0=' + crypto.createHmac('sha256', secret).update(message).digest('hex');
+
+    if (sig !== digest) {
+      console.error('❌ Invalid signature');
+      console.info('Expected:', digest);
+      console.info('Received:', sig);
+      return res.status(401).send('Request unauthorized');
+    }
+
+    console.log('✅ ElevenLabs webhook signature validated');
+
+    // Parse the JSON body (since we received it as raw buffer)
+    const webhookData = JSON.parse(req.body.toString());
+    console.log('📦 Parsed webhook data:', JSON.stringify(webhookData, null, 2));
+
+    const { type, data } = webhookData;
+
+    switch (type) {
+      case 'post_call_transcription':
+        console.log(`🏁 Post-call transcription received for conversation: ${data.conversation_id}`);
+        console.log(`📞 Call duration: ${data.metadata?.call_duration_secs} seconds`);
+        console.log(`✅ Call successful: ${data.analysis?.call_successful}`);
+
+        // Find the call record
+        const { data: callRecord } = await supabase
+          .from('elevenlabs_calls')
+          .select('*')
+          .eq('conversation_id', data.conversation_id)
+          .maybeSingle();
+
+        if (!callRecord) {
+          console.error(`❌ No call record found for conversation ${data.conversation_id}`);
+          return res.status(404).json({ error: 'Call record not found' });
+        }
+
+        // Extract whether human was reached from evaluation criteria
+        // ElevenLabs returns: { talked_to_a_human: { result: "success" | "failure", ... } }
+        const evaluationResults = data.analysis?.evaluation_criteria_results || {};
+        const humanContactResult = evaluationResults.talked_to_a_human?.result;
+        const talkedToHuman = humanContactResult === 'success';
+
+        console.log(`👤 Talked to human: ${talkedToHuman} (result: ${humanContactResult})`);
+
+        // Create plain text transcript
+        let transcriptText = '';
+        if (data.transcript && Array.isArray(data.transcript)) {
+          transcriptText = data.transcript
+            .map((exchange: any) => `${exchange.role}: ${exchange.message}`)
+            .join('\n');
+        }
+
+        // Extract collected variables
+        const collectedVariables: Record<string, any> = {};
+        if (data.analysis?.data_collection_results) {
+          Object.entries(data.analysis.data_collection_results).forEach(([key, value]: [string, any]) => {
+            collectedVariables[key] = value?.value || value;
+          });
+        }
+
+        // Update the call record
+        const { error: updateError } = await supabase
+          .from('elevenlabs_calls')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString(),
+            duration_seconds: data.metadata?.call_duration_secs || 0,
+            talked_to_human: talkedToHuman,
+            transcript: data.transcript,
+            transcript_text: transcriptText,
+            variables_collected: collectedVariables,
+            analysis: data.analysis,
+          })
+          .eq('id', callRecord.id);
+
+        if (updateError) {
+          console.error(`❌ Failed to update call record: ${updateError.message}`);
+          return res.status(500).json({ error: updateError.message });
+        }
+
+        console.log(`✅ Updated call record ${callRecord.id} - talked_to_human: ${talkedToHuman}`);
+
+        // Send signal to workflow
+        try {
+          const client = await getTemporalClient();
+          const handle = client.workflow.getHandle(callRecord.workflow_id);
+
+          await handle.signal('callCompleted', {
+            conversationId: data.conversation_id,
+            talkedToHuman,
+            failed: false,
+          });
+
+          console.log(`✅ Sent callCompleted signal to workflow ${callRecord.workflow_id}`);
+        } catch (error: any) {
+          console.error(`❌ Failed to send signal to workflow: ${error.message}`);
+          // Don't fail the webhook - the workflow will fall back to polling
+        }
+
+        break;
+
+      case 'call_initiation_failure':
+        console.log(`❌ Call initiation failure for conversation: ${data.conversation_id}`);
+        console.log(`   Failure reason: ${data.failure_reason}`);
+
+        // Find the call record by conversation_id or call_sid
+        const failureCallSid = data.metadata?.body?.CallSid || data.metadata?.body?.call_sid;
+
+        let { data: failedCall } = await supabase
+          .from('elevenlabs_calls')
+          .select('*')
+          .eq('conversation_id', data.conversation_id)
+          .maybeSingle();
+
+        if (!failedCall && failureCallSid) {
+          const result = await supabase
+            .from('elevenlabs_calls')
+            .select('*')
+            .eq('call_sid', failureCallSid)
+            .maybeSingle();
+          failedCall = result.data;
+        }
+
+        if (!failedCall) {
+          console.error(`❌ No call record found for failed conversation ${data.conversation_id}`);
+          return res.status(404).json({ error: 'Call record not found' });
+        }
+
+        // Update the call record to mark it as failed
+        const { error: failureUpdateError } = await supabase
+          .from('elevenlabs_calls')
+          .update({
+            status: 'failed',
+            completed_at: new Date().toISOString(),
+            failure_reason: data.failure_reason,
+            talked_to_human: false,
+            analysis: {
+              failure_reason: data.failure_reason,
+              failure_metadata: data.metadata,
+            },
+          })
+          .eq('id', failedCall.id);
+
+        if (failureUpdateError) {
+          console.error(`❌ Failed to update call record: ${failureUpdateError.message}`);
+          return res.status(500).json({ error: failureUpdateError.message });
+        }
+
+        console.log(`✅ Marked call ${failedCall.id} as failed (${data.failure_reason})`);
+
+        // Send signal to workflow
+        try {
+          const client = await getTemporalClient();
+          const handle = client.workflow.getHandle(failedCall.workflow_id);
+
+          await handle.signal('callCompleted', {
+            conversationId: data.conversation_id,
+            talkedToHuman: false,
+            failed: true,
+            failureReason: data.failure_reason,
+          });
+
+          console.log(`✅ Sent callCompleted signal to workflow ${failedCall.workflow_id}`);
+        } catch (error: any) {
+          console.error(`❌ Failed to send signal to workflow: ${error.message}`);
+          // Don't fail the webhook - the workflow will fall back to polling
+        }
+
+        break;
+
+      default:
+        console.log(`📋 Unknown event type: ${type}`);
+    }
+
+    res.status(200).json({ status: 'success' });
+  } catch (error: any) {
+    console.error('Error handling ElevenLabs webhook:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Apply JSON parsing to all other routes
 app.use(express.json());
 
 // Socket.io connection handling
@@ -124,9 +358,9 @@ app.get('/api/workflows/catalog', async (req, res) => {
     // Simple workflow metadata (hardcoded for reliability)
     const workflows = [
       {
-        name: 'recordsWorkflow',
-        displayName: 'Medical Records Retrieval',
-        description: 'Full workflow for contacting patients, collecting transcripts, and requesting medical records from providers',
+        name: 'endToEndWorkflow',
+        displayName: 'End-to-End Medical Records',
+        description: 'Complete workflow: patient outreach, transcript collection, provider records retrieval, and downstream analysis',
         category: 'production',
         defaultParams: {
           patientOutreach: {
@@ -212,7 +446,7 @@ app.get('/api/workflows/:workflowName/source', async (req, res) => {
 
     // Map workflow names to file paths
     const workflowFiles: Record<string, string> = {
-      recordsWorkflow: 'recordsWorkflow.ts',
+      endToEndWorkflow: 'recordsWorkflow.ts',
       patientOutreachWorkflow: 'patientOutreachWorkflow.ts',
       recordsRetrievalWorkflow: 'recordsRetrievalWorkflow.ts',
       testSMSWorkflow: 'testWorkflows.ts',
@@ -239,7 +473,7 @@ app.get('/api/workflows/:workflowName/source', async (req, res) => {
 // Start workflow for a patient case
 app.post('/api/workflows/start', async (req, res) => {
   try {
-    const { patientCaseId, workflowName = 'recordsWorkflow', parameters = {} } = req.body;
+    const { patientCaseId, workflowName = 'endToEndWorkflow', parameters = {} } = req.body;
 
     if (!patientCaseId) {
       return res.status(400).json({ error: 'patientCaseId is required' });
@@ -279,7 +513,7 @@ app.post('/api/workflows/start', async (req, res) => {
 
     // Prepare workflow args based on workflow type
     let args: any[] = [patientCaseId];
-    if (workflowName === 'recordsWorkflow') {
+    if (workflowName === 'endToEndWorkflow') {
       args = [patientCaseId, parameters];
     } else if (workflowName.startsWith('test')) {
       args = [patientCaseId, parameters];

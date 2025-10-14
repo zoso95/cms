@@ -42,10 +42,10 @@ export interface WorkflowMetadata {
 
 // Workflow registry
 export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
-  recordsWorkflow: {
-    name: 'recordsWorkflow',
-    displayName: 'Medical Records Retrieval',
-    description: 'Full workflow for contacting patients, collecting transcripts, and requesting medical records from providers',
+  endToEndWorkflow: {
+    name: 'endToEndWorkflow',
+    displayName: 'End-to-End Medical Records',
+    description: 'Complete workflow: patient outreach, transcript collection, provider records retrieval, and downstream analysis',
     category: 'production',
     parameters: RecordsWorkflowParamsSchema,
     defaultParams: {
