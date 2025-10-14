@@ -11,6 +11,7 @@ import { registerWorkflow, type RegisterWorkflowParams } from './utils/workflowR
 import { claude } from './services/claude';
 import { openSignService } from './services/opensign';
 import { mailgunService } from './services/mailgun';
+import { npiService } from './services/npi';
 
 // Lazy-initialize Twilio client
 let twilioClient: ReturnType<typeof twilio> | null = null;
@@ -859,32 +860,110 @@ export async function createRecordsRequest(
   return result.requestId!;
 }
 
-export async function findDoctorOffice(providerName: string): Promise<{
+export async function findDoctorOffice(
+  patientCaseId: number,
+  providerName: string
+): Promise<{
   name: string;
   method: 'email' | 'fax';
   contact: string;
+  verificationRequired?: boolean;
+  verificationId?: string;
 }> {
   console.log(`[Activity] Finding contact info for provider: ${providerName}`);
 
-  // In a real implementation, this would search a database or use an API
-  // For now, return mock data
+  // Get provider details from database
+  const { data: provider } = await supabase
+    .from('providers')
+    .select('*')
+    .eq('patient_case_id', patientCaseId)
+    .or(`name.eq.${providerName},full_name.eq.${providerName}`)
+    .maybeSingle();
+
+  if (!provider) {
+    console.log(`[Activity] Provider ${providerName} not found in database`);
+    throw new Error(`Provider ${providerName} not found`);
+  }
+
+  // Check if we already have verified contact info
+  if (provider.verified && (provider.fax_number || provider.contact_info)) {
+    console.log(`[Activity] Using verified contact info for ${providerName}`);
+    return {
+      name: provider.full_name || provider.name,
+      method: provider.fax_number ? 'fax' : 'email',
+      contact: provider.fax_number || provider.contact_info || 'records@example.com'
+    };
+  }
+
+  // Perform NPI lookup
+  console.log(`[Activity] Performing NPI lookup for ${providerName}`);
+  const npiResult = await npiService.searchProvider({
+    firstName: provider.first_name,
+    lastName: provider.last_name,
+    organization: provider.organization,
+    city: provider.city,
+    state: provider.state
+  });
+
+  // Create verification request
+  const verificationId = uuidv4();
+  const workflowExecutionId = await getWorkflowExecutionIdFromDb(patientCaseId);
+
+  // Get call transcript ID if available
+  const { data: callTranscript } = await supabase
+    .from('call_transcripts')
+    .select('id')
+    .eq('patient_case_id', patientCaseId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  await supabase.from('provider_verifications').insert({
+    id: verificationId,
+    patient_case_id: patientCaseId,
+    provider_id: provider.id,
+    workflow_execution_id: workflowExecutionId,
+    call_transcript_id: callTranscript?.id,
+    extracted_provider_info: {
+      first_name: provider.first_name,
+      last_name: provider.last_name,
+      full_name: provider.full_name || provider.name,
+      organization: provider.organization,
+      city: provider.city,
+      state: provider.state,
+      specialty: provider.specialty,
+      context_in_case: provider.context_in_case
+    },
+    npi_lookup_results: npiResult.success ? {
+      provider: npiResult.provider,
+      candidates: npiResult.candidates
+    } : null,
+    status: 'pending'
+  });
+
+  console.log(`[Activity] Created verification request ${verificationId}`);
+
+  // If NPI found a result with fax, use it (but still require verification)
+  if (npiResult.success && npiResult.provider?.faxNumber) {
+    console.log(`[Activity] NPI found fax number: ${npiResult.provider.faxNumber}`);
+    return {
+      name: providerName,
+      method: 'fax',
+      contact: npiResult.provider.faxNumber,
+      verificationRequired: true,
+      verificationId
+    };
+  }
+
+  // No fax found - need manual verification
+  console.log(`[Activity] No fax number found - manual verification required`);
   return {
     name: providerName,
-    method: 'email',
-    contact: 'records@example.com',
+    method: 'fax', // Default to fax, will be updated after verification
+    contact: '', // Will be filled in after verification
+    verificationRequired: true,
+    verificationId
   };
-}
-
-export async function manualVerify(contact: {
-  name: string;
-  method: 'email' | 'fax';
-  contact: string;
-}): Promise<boolean> {
-  console.log(`[Activity] Manually verifying contact: ${contact.name}`);
-
-  // In a real implementation, this would wait for human verification
-  // For now, auto-approve
-  return true;
 }
 
 export async function sendFax(

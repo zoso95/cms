@@ -67,4 +67,17 @@ export const api = {
 
   // Claude Analysis
   getPatientCaseAnalysis: (id: string) => apiRequest<any>(`/patient-cases/${id}/analysis`),
+
+  // Verifications
+  getPatientCaseVerifications: (id: string) => apiRequest<any[]>(`/patient-cases/${id}/verifications`),
+  approveVerification: (verificationId: string, contactInfo: any) =>
+    apiRequest<{ success: boolean }>(`/verifications/${verificationId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(contactInfo),
+    }),
+  rejectVerification: (verificationId: string, reason: string) =>
+    apiRequest<{ success: boolean }>(`/verifications/${verificationId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
 };

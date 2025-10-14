@@ -1002,6 +1002,198 @@ app.get('/api/patient-cases/:id/analysis', async (req, res) => {
 });
 
 // ============================================
+// Provider Verifications Routes
+// ============================================
+
+// Get all verification requests for a patient case
+app.get('/api/patient-cases/:id/verifications', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('provider_verifications')
+      .select(`
+        *,
+        provider:providers(id, full_name, name, organization),
+        call_transcript:call_transcripts(transcript)
+      `)
+      .eq('patient_case_id', req.params.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single verification with full details
+app.get('/api/verifications/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('provider_verifications')
+      .select(`
+        *,
+        provider:providers(*),
+        call_transcript:call_transcripts(*),
+        workflow:workflow_executions(workflow_id, workflow_name)
+      `)
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Approve verification with contact info
+app.post('/api/verifications/:id/approve', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { faxNumber, email, ...otherContactInfo } = req.body;
+
+    if (!faxNumber && !email) {
+      return res.status(400).json({ error: 'Either fax number or email is required' });
+    }
+
+    // Get verification to find provider
+    const { data: verification, error: verifyError } = await supabase
+      .from('provider_verifications')
+      .select('provider_id')
+      .eq('id', id)
+      .single();
+
+    if (verifyError) throw verifyError;
+
+    // Update verification status
+    const { error: updateError } = await supabase
+      .from('provider_verifications')
+      .update({
+        status: 'approved',
+        verified_contact_info: {
+          fax_number: faxNumber,
+          email,
+          ...otherContactInfo
+        },
+        verified_by: 'user', // TODO: Add actual user tracking
+        verified_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    if (updateError) throw updateError;
+
+    // Update provider record with verified contact info
+    if (verification.provider_id) {
+      const updateData: any = {
+        verified: true, // Mark provider as verified
+      };
+      if (faxNumber) updateData.fax_number = faxNumber;
+      if (email) updateData.contact_info = email;
+      if (otherContactInfo.organization) updateData.organization = otherContactInfo.organization;
+      if (otherContactInfo.specialty) updateData.specialty = otherContactInfo.specialty;
+      if (otherContactInfo.address) updateData.address = otherContactInfo.address;
+      if (otherContactInfo.city) updateData.city = otherContactInfo.city;
+      if (otherContactInfo.state) updateData.state = otherContactInfo.state;
+      if (otherContactInfo.phoneNumber) updateData.phone_number = otherContactInfo.phoneNumber;
+      if (otherContactInfo.npi) updateData.npi = otherContactInfo.npi;
+
+      await supabase
+        .from('providers')
+        .update(updateData)
+        .eq('id', verification.provider_id);
+    }
+
+    // Send signal to workflow to continue
+    const { data: fullVerification } = await supabase
+      .from('provider_verifications')
+      .select('workflow_execution_id')
+      .eq('id', id)
+      .single();
+
+    if (fullVerification?.workflow_execution_id) {
+      const { data: workflowExec } = await supabase
+        .from('workflow_executions')
+        .select('workflow_id')
+        .eq('id', fullVerification.workflow_execution_id)
+        .single();
+
+      if (workflowExec?.workflow_id) {
+        try {
+          const client = await getTemporalClient();
+          const handle = client.workflow.getHandle(workflowExec.workflow_id);
+          await handle.signal('verificationComplete', true, {
+            faxNumber,
+            email,
+            ...otherContactInfo
+          });
+          console.log(`✅ Sent verificationComplete signal to workflow ${workflowExec.workflow_id}`);
+        } catch (error: any) {
+          console.error(`❌ Failed to send signal to workflow: ${error.message}`);
+          // Don't fail the request - verification is still saved
+        }
+      }
+    }
+
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reject verification
+app.post('/api/verifications/:id/reject', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    const { error } = await supabase
+      .from('provider_verifications')
+      .update({
+        status: 'rejected',
+        verified_contact_info: { rejection_reason: reason },
+        verified_by: 'user', // TODO: Add actual user tracking
+        verified_at: new Date().toISOString()
+      })
+      .eq('id', id);
+
+    if (error) throw error;
+
+    // Send signal to workflow to fail
+    const { data: fullVerification } = await supabase
+      .from('provider_verifications')
+      .select('workflow_execution_id')
+      .eq('id', id)
+      .single();
+
+    if (fullVerification?.workflow_execution_id) {
+      const { data: workflowExec } = await supabase
+        .from('workflow_executions')
+        .select('workflow_id')
+        .eq('id', fullVerification.workflow_execution_id)
+        .single();
+
+      if (workflowExec?.workflow_id) {
+        try {
+          const client = await getTemporalClient();
+          const handle = client.workflow.getHandle(workflowExec.workflow_id);
+          await handle.signal('verificationComplete', false);
+          console.log(`✅ Sent verificationComplete (rejected) signal to workflow ${workflowExec.workflow_id}`);
+        } catch (error: any) {
+          console.error(`❌ Failed to send signal to workflow: ${error.message}`);
+          // Don't fail the request - rejection is still saved
+        }
+      }
+    }
+
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
 // Webhook Routes
 // ============================================
 

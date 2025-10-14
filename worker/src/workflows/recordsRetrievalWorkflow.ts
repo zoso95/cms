@@ -1,10 +1,19 @@
-import { proxyActivities, sleep, log } from '@temporalio/workflow';
+import { proxyActivities, sleep, log, setHandler, condition, defineSignal } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { RecordsRetrievalParams } from './registry';
 import { setupPauseHandlers, checkPaused } from '../utils/pauseResume';
 
+// Define verification signal
+export const verificationCompleteSignal = defineSignal<[boolean, any?]>('verificationComplete');
+
+// Short-running activities (status updates, quick DB queries)
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
+});
+
+// Long-running activities (API calls)
+const longActivities = proxyActivities<typeof activities>({
+  startToCloseTimeout: '10 minutes',
 });
 
 export interface RecordsRetrievalResult {
@@ -36,7 +45,7 @@ export async function recordsRetrievalWorkflow(
 
   await checkPaused();
   await a.updateWorkflowStatus(`Creating records request for ${provider}`);
-  const requestId = await a.createRecordsRequest(patientCaseId, provider);
+  const requestId = await longActivities.createRecordsRequest(patientCaseId, provider);
   log.info('Records request created', { patientCaseId, provider, requestId });
 
   // Poll for signature completion (OpenSign doesn't have webhooks yet)
@@ -51,14 +60,14 @@ export async function recordsRetrievalWorkflow(
   while (!signatureDone && signatureAttempts < maxSignatureAttempts) {
     log.info('Checking signature status', { patientCaseId, provider, requestId, attempt: signatureAttempts + 1 });
 
-    const signatureStatus = await a.waitForSignature(requestId, patientCaseId);
+    const signatureStatus = await longActivities.waitForSignature(requestId, patientCaseId);
     signatureDone = signatureStatus.done;
     signatureSigned = signatureStatus.signed;
 
     if (!signatureDone) {
       //await sleep('3 hours'); // Check every 3 hours
       // TODO fix me!
-      await sleep('1 minute'); // Check every 3 hours
+      await sleep('3 minute'); // Check every 3 hours
       signatureAttempts++;
     }
   }
@@ -79,29 +88,67 @@ export async function recordsRetrievalWorkflow(
 
   await checkPaused();
   await a.updateWorkflowStatus(`Finding contact info for ${provider}`);
-  const contact = await a.findDoctorOffice(provider);
+  const contact = await longActivities.findDoctorOffice(patientCaseId, provider);
   log.info('Doctor office contact found', { patientCaseId, provider, contact });
 
-  await checkPaused();
-  await a.updateWorkflowStatus('Waiting for manual verification of contact');
-  const verified = await a.manualVerify(contact);
-  if (!verified) {
-    log.error('Verification failed', { patientCaseId, provider, contact });
-    await a.updateWorkflowStatus(`Verification failed for ${provider}`);
-    throw new Error('Verification failed for ' + provider);
+  // If verification is required, wait for signal from frontend
+  if (contact.verificationRequired && contact.verificationId) {
+    await checkPaused();
+    await a.updateWorkflowStatus('Waiting for manual verification of contact');
+    log.info('Waiting for manual verification signal', { verificationId: contact.verificationId });
+
+    // Set up signal handler for verification completion
+    let verificationApproved = false;
+    let verificationRejected = false;
+    let verifiedContactInfo: any = null;
+
+    setHandler(verificationCompleteSignal, (approved: boolean, contactInfo?: any) => {
+      log.info('Received verification signal', { approved, contactInfo });
+      if (approved) {
+        verificationApproved = true;
+        verifiedContactInfo = contactInfo;
+      } else {
+        verificationRejected = true;
+      }
+    });
+
+    // Wait for signal (with timeout)
+    const verificationTimeout = condition(() => verificationApproved || verificationRejected, '7 days');
+    const verified = await verificationTimeout;
+
+    if (!verified) {
+      log.error('Verification timed out', { patientCaseId, provider, verificationId: contact.verificationId });
+      await a.updateWorkflowStatus(`Verification timed out for ${provider}`);
+      throw new Error(`Verification timed out for ${provider} after 7 days`);
+    }
+
+    if (verificationRejected) {
+      log.error('Verification rejected', { patientCaseId, provider, verificationId: contact.verificationId });
+      await a.updateWorkflowStatus(`Verification rejected for ${provider}`);
+      throw new Error('Verification rejected for ' + provider);
+    }
+
+    log.info('Contact verified', { patientCaseId, provider });
+
+    // Update contact info with verified details
+    if (verifiedContactInfo) {
+      contact.contact = verifiedContactInfo.faxNumber || verifiedContactInfo.email || contact.contact;
+      contact.method = verifiedContactInfo.faxNumber ? 'fax' : 'email';
+    }
+  } else {
+    log.info('No verification required - using existing contact info', { patientCaseId, provider });
   }
-  log.info('Contact verified', { patientCaseId, provider });
 
   await checkPaused();
   // Send request via fax or email
   if (contact.method === 'fax') {
     log.info('Sending fax', { patientCaseId, provider });
     await a.updateWorkflowStatus(`Sending fax to ${provider}`);
-    await a.sendFax(contact, requestId);
+    await longActivities.sendFax(contact, requestId);
   } else {
     log.info('Sending email', { patientCaseId, provider });
     await a.updateWorkflowStatus(`Sending email to ${provider}`);
-    await a.sendEmail(contact, requestId);
+    await longActivities.sendEmail(contact, requestId);
   }
 
   await checkPaused();
@@ -115,7 +162,7 @@ export async function recordsRetrievalWorkflow(
   while (!recordsReceived) {
     try {
       log.info('Waiting for records', { patientCaseId, provider, followUpAttempts });
-      await a.waitForRecords(provider);
+      await longActivities.waitForRecords(provider);
       recordsReceived = true;
     } catch (error) {
       // If follow-ups are enabled and we haven't hit the max, try again
@@ -133,9 +180,9 @@ export async function recordsRetrievalWorkflow(
 
         // Send follow-up request
         if (contact.method === 'fax') {
-          await a.sendFax(contact, requestId);
+          await longActivities.sendFax(contact, requestId);
         } else {
-          await a.sendEmail(contact, requestId);
+          await longActivities.sendEmail(contact, requestId);
         }
       } else {
         // No more follow-ups, throw error
@@ -153,7 +200,7 @@ export async function recordsRetrievalWorkflow(
   await checkPaused();
   log.info('Ingesting records', { patientCaseId, provider });
   await a.updateWorkflowStatus(`Ingesting records from ${provider}`);
-  await a.ingestRecords(provider);
+  await longActivities.ingestRecords(provider);
 
   log.info('Records retrieval workflow completed', { patientCaseId, provider });
   await a.updateWorkflowStatus(`Completed: Records from ${provider} retrieved successfully`);
