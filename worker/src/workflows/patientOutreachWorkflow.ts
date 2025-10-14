@@ -160,7 +160,7 @@ export async function patientOutreachWorkflow(
   }
 
   const result: PatientOutreachResult = {
-    success: pickedUp || userResponded !== null,
+    success: pickedUp,
     pickedUp,
     userResponded,
     attempts: attemptCount,
