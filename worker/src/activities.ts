@@ -8,6 +8,7 @@ import { elevenlabs } from './services/elevenlabs';
 import { normalizePhoneNumber } from './utils/phone';
 import { buildDynamicVariables } from './utils/dynamicVariables';
 import { registerWorkflow, type RegisterWorkflowParams } from './utils/workflowRegistry';
+import { claude } from './services/claude';
 
 // Lazy-initialize Twilio client
 let twilioClient: ReturnType<typeof twilio> | null = null;
@@ -389,11 +390,34 @@ export async function scheduleCall(patientCaseId: number, message: string): Prom
 export async function collectTranscript(patientCaseId: number): Promise<string> {
   console.log(`[Activity] Collecting transcript for patient case ${patientCaseId}`);
 
-  // In a real implementation, this would fetch from Twilio or a recording service
-  // For now, we'll simulate it
-  const mockTranscript = `Patient discussed their medical records request. They mentioned seeing Dr. Smith at Memorial Hospital and Dr. Johnson at City Clinic for their recent treatments.`;
-
   const workflowExecutionId = await getWorkflowExecutionIdFromDb(patientCaseId);
+
+  // Get the most recent completed call from ElevenLabs
+  const { data: call, error: callError } = await supabase
+    .from('elevenlabs_calls')
+    .select('*')
+    .eq('patient_case_id', patientCaseId)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (callError) {
+    console.error(`[Activity] Error fetching call: ${callError.message}`);
+    throw callError;
+  }
+
+  if (!call) {
+    console.error(`[Activity] No completed call found for patient case ${patientCaseId}`);
+    throw new Error(`No completed call found for patient case ${patientCaseId}`);
+  }
+
+  if (!call.transcript_text) {
+    console.error(`[Activity] Call ${call.id} has no transcript text`);
+    throw new Error(`Call ${call.id} has no transcript text`);
+  }
+
+  console.log(`[Activity] Found transcript for call ${call.id}, length: ${call.transcript_text.length} chars`);
 
   // Get the most recent call communication log
   const { data: callLog } = await supabase
@@ -403,44 +427,155 @@ export async function collectTranscript(patientCaseId: number): Promise<string> 
     .eq('type', 'call')
     .order('created_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  // Store transcript
+  // Store transcript in call_transcripts table
   await supabase
     .from('call_transcripts')
     .insert({
       id: uuidv4(),
       patient_case_id: patientCaseId,
       workflow_execution_id: workflowExecutionId,
-      communication_log_id: callLog?.id || uuidv4(),
-      transcript: mockTranscript,
+      communication_log_id: callLog?.id,
+      transcript: call.transcript_text,
+      analysis: call.analysis || {},
     });
 
-  return mockTranscript;
+  console.log(`[Activity] Stored transcript in call_transcripts table`);
+
+  return call.transcript_text;
 }
 
 // ============================================
 // Analysis Activities
 // ============================================
-export async function analyzeTranscript(transcript: string): Promise<Record<string, any>> {
-  console.log(`[Activity] Analyzing transcript`);
+export async function analyzeTranscript(
+  patientCaseId: number,
+  transcript: string
+): Promise<Record<string, any>> {
+  console.log(`[Activity] Analyzing transcript with Claude AI for patient case ${patientCaseId}`);
 
-  // In a real implementation, this would use AI/NLP
-  // For now, we'll return mock analysis
-  const analysis = {
-    intent: 'medical_records_request',
-    providers_mentioned: ['Dr. Smith at Memorial Hospital', 'Dr. Johnson at City Clinic'],
-    urgency: 'medium',
-    sentiment: 'positive',
-  };
+  // Get existing variables from ElevenLabs call if available
+  const { data: call } = await supabase
+    .from('elevenlabs_calls')
+    .select('variables_collected')
+    .eq('patient_case_id', patientCaseId)
+    .eq('status', 'completed')
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const existingVariables = call?.variables_collected || {};
+  console.log(`[Activity] Found ${Object.keys(existingVariables).length} existing variables from call`);
+
+  // Analyze case merits with Claude
+  const analysis = await claude.analyzeCaseMerits(transcript, existingVariables);
+  console.log(`[Activity] Case analysis complete - Quality score: ${analysis.qualityScore}`);
+
+  // Store analysis in case_analysis table
+  const workflowExecutionId = await getWorkflowExecutionIdFromDb(patientCaseId);
+
+  // Get the call transcript ID we just created
+  const { data: callTranscript } = await supabase
+    .from('call_transcripts')
+    .select('id')
+    .eq('patient_case_id', patientCaseId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  await supabase
+    .from('claude_case_analysis')
+    .upsert({
+      patient_case_id: patientCaseId,
+      workflow_execution_id: workflowExecutionId,
+      call_transcript_id: callTranscript?.id,
+      quality_score: analysis.qualityScore,
+      summary: analysis.summary,
+      medical_subject: analysis.medicalSubject,
+      patient_info: analysis.patientInfo,
+      doctor_info_quality: analysis.doctorInfoQuality,
+      core_scales: analysis.coreScales,
+      case_factors: analysis.caseFactors,
+      legal_practical_factors: analysis.legalPracticalFactors,
+      call_quality_assessment: analysis.callQualityAssessment,
+      next_actions: analysis.nextActions,
+      compliance_notes: analysis.complianceNotes,
+      overall_case_assessment: analysis.overallCaseAssessment,
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: 'patient_case_id',
+    });
+
+  console.log(`[Activity] Case analysis stored in database`);
 
   return analysis;
 }
 
-export async function extractProviders(analysis: Record<string, any>): Promise<string[]> {
-  console.log(`[Activity] Extracting providers from analysis`);
+export async function extractProviders(
+  patientCaseId: number,
+  transcript: string
+): Promise<Array<{ id: string; fullName: string }>> {
+  console.log(`[Activity] Extracting providers from transcript with Claude AI`);
 
-  return analysis.providers_mentioned || [];
+  const providers = await claude.extractProviders(transcript);
+  console.log(`[Activity] Extracted ${providers.length} providers`);
+
+  // Get workflow execution ID for database records
+  const workflowExecutionId = await getWorkflowExecutionIdFromDb(patientCaseId);
+
+  // Save providers to database with all extracted fields and return IDs
+  const savedProviders: Array<{ id: string; fullName: string }> = [];
+
+  if (providers.length > 0) {
+    const providerRecords = providers.map((provider) => {
+      const id = uuidv4();
+      const fullName = provider.fullName || `${provider.firstName || ''} ${provider.lastName || ''}`.trim();
+
+      savedProviders.push({ id, fullName });
+
+      return {
+        id,
+        patient_case_id: patientCaseId,
+        workflow_execution_id: workflowExecutionId,
+        // Legacy fields
+        name: fullName,
+        specialty: provider.specialty,
+        contact_method: provider.faxNumber ? 'fax' : provider.phoneNumber ? 'phone' : null,
+        contact_info: provider.faxNumber || provider.phoneNumber || null,
+        verified: false,
+        records_received: false,
+        // New comprehensive fields from Claude
+        first_name: provider.firstName,
+        last_name: provider.lastName,
+        full_name: fullName,
+        provider_type: provider.providerType,
+        organization: provider.organization,
+        city: provider.city,
+        state: provider.state,
+        address: provider.address,
+        phone_number: provider.phoneNumber,
+        fax_number: provider.faxNumber,
+        npi: provider.npi,
+        role: provider.role,
+        context_in_case: provider.contextInCase,
+      };
+    });
+
+    const { error: insertError } = await supabase
+      .from('providers')
+      .insert(providerRecords);
+
+    if (insertError) {
+      console.error(`[Activity] Error inserting providers:`, insertError);
+      throw insertError;
+    }
+
+    console.log(`[Activity] Saved ${providers.length} providers to database with full details`);
+  }
+
+  // Return provider IDs and names for the workflow to use
+  return savedProviders;
 }
 
 // ============================================

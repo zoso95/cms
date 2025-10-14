@@ -338,17 +338,6 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
     res.status(200).json({ status: 'success' });
   } catch (error: any) {
     console.error('Error handling ElevenLabs webhook:', error);
-
-    // Try to mark webhook as processed with error if we have the ID
-    try {
-      const webhookData = JSON.parse(req.body.toString());
-      await supabase.from('webhook_events').update({
-        processed: true,
-      }).where('event_type', 'like', 'elevenlabs:%').order('created_at', { ascending: false }).limit(1);
-    } catch (updateError) {
-      console.error('Failed to update webhook event:', updateError);
-    }
-
     res.status(500).json({ error: error.message });
   }
 });
@@ -700,7 +689,26 @@ app.get('/api/patient-cases/:id/workflows', async (req, res) => {
 
     if (error) throw error;
 
-    res.json(data);
+    // Enrich workflows with provider names
+    const enrichedWorkflows = await Promise.all(
+      (data || []).map(async (workflow) => {
+        if (workflow.entity_type === 'provider' && workflow.entity_id) {
+          const { data: provider } = await supabase
+            .from('providers')
+            .select('full_name, name')
+            .eq('id', workflow.entity_id)
+            .maybeSingle();
+
+          return {
+            ...workflow,
+            entity_name: provider?.full_name || provider?.name || null,
+          };
+        }
+        return workflow;
+      })
+    );
+
+    res.json(enrichedWorkflows);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -929,6 +937,28 @@ app.get('/api/patient-cases/:id/transcripts', async (req, res) => {
       .select('*')
       .eq('patient_case_id', req.params.id)
       .order('created_at', { ascending: false});
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// Claude Analysis Routes
+// ============================================
+
+app.get('/api/patient-cases/:id/analysis', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('claude_case_analysis')
+      .select('*')
+      .eq('patient_case_id', req.params.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) throw error;
 

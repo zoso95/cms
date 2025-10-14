@@ -5,8 +5,14 @@ import { patientOutreachWorkflow } from './patientOutreachWorkflow';
 import { EndToEndWorkflowParams } from './registry';
 import { setupPauseHandlers, checkPaused, pauseSignal, resumeSignal } from '../utils/pauseResume';
 
+// Regular activities with 1 minute timeout
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
+});
+
+// AI activities (Claude API calls) with longer timeout
+const aiActivities = proxyActivities<typeof activities>({
+  startToCloseTimeout: '5 minutes',
 });
 
 /**
@@ -90,11 +96,11 @@ export async function endToEndWorkflow(
   log.info('Transcript collected', { patientCaseId, transcriptLength: transcript.length });
 
   await a.updateWorkflowStatus('Phase 2: Analyzing transcript with AI');
-  const analysis = await a.analyzeTranscript(transcript);
+  const analysis = await aiActivities.analyzeTranscript(patientCaseId, transcript);
   log.info('Transcript analyzed', { patientCaseId, analysis });
 
   await a.updateWorkflowStatus('Phase 2: Extracting provider information');
-  const providers = await a.extractProviders(analysis);
+  const providers = await aiActivities.extractProviders(patientCaseId, transcript);
   log.info('Providers extracted', { patientCaseId, providerCount: providers.length, providers });
   await a.updateWorkflowStatus(`Phase 2 complete: Found ${providers.length} provider(s)`);
 
@@ -107,19 +113,21 @@ export async function endToEndWorkflow(
     providers.map(async (provider, index) => {
       log.info(`Starting records retrieval for provider ${index + 1}/${providers.length}`, {
         patientCaseId,
-        provider,
+        providerId: provider.id,
+        providerName: provider.fullName,
       });
 
       // Register child workflow before starting it
-      const retrievalWorkflowId = `records-retrieval-${patientCaseId}-${provider.replace(/\s/g, '-')}-${Date.now()}`;
+      const retrievalWorkflowId = `records-retrieval-${patientCaseId}-${provider.id}-${Date.now()}`;
       await a.registerChildWorkflow({
         workflowId: retrievalWorkflowId,
         workflowName: 'recordsRetrievalWorkflow',
         patientCaseId,
         entityType: 'provider',
-        entityId: provider, // Using provider name as entity ID for now
+        entityId: provider.id, // Using actual database provider ID
         parameters: {
-          provider,
+          providerId: provider.id,
+          providerName: provider.fullName,
           ...config.recordsRetrieval,
         },
       });
@@ -127,7 +135,7 @@ export async function endToEndWorkflow(
       // Start the child workflow
       return executeChild(recordsRetrievalWorkflow, {
         workflowId: retrievalWorkflowId,
-        args: [patientCaseId, provider, config.recordsRetrieval],
+        args: [patientCaseId, provider.fullName, config.recordsRetrieval],
       });
     })
   );

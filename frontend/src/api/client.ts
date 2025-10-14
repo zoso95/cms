@@ -64,4 +64,7 @@ export const api = {
 
   // Transcripts
   getPatientCaseTranscripts: (id: string) => apiRequest<any[]>(`/patient-cases/${id}/transcripts`),
+
+  // Claude Analysis
+  getPatientCaseAnalysis: (id: string) => apiRequest<any>(`/patient-cases/${id}/analysis`),
 };

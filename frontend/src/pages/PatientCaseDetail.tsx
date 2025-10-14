@@ -54,7 +54,11 @@ function WorkflowCard({
           </p>
           {workflow.entity_type && workflow.entity_id && (
             <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>
-              Entity: {workflow.entity_type} #{workflow.entity_id}
+              {workflow.entity_type === 'provider' && workflow.entity_name ? (
+                <>Provider: {workflow.entity_name}</>
+              ) : (
+                <>Entity: {workflow.entity_type} #{workflow.entity_id}</>
+              )}
             </p>
           )}
           <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.5rem' }}>
@@ -284,7 +288,7 @@ function WorkflowHierarchy({
 export default function PatientCaseDetail() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'workflows' | 'communications' | 'providers' | 'transcripts'>('workflows');
+  const [activeTab, setActiveTab] = useState<'workflows' | 'communications' | 'providers' | 'transcripts' | 'analysis'>('workflows');
   const [showWorkflowSelector, setShowWorkflowSelector] = useState(false);
 
   const { data: patientCase, isLoading: caseLoading } = useQuery({
@@ -315,6 +319,12 @@ export default function PatientCaseDetail() {
     queryKey: ['patient-case-transcripts', id],
     queryFn: () => api.getPatientCaseTranscripts(id!),
     enabled: !!id && activeTab === 'transcripts',
+  });
+
+  const { data: analysis } = useQuery({
+    queryKey: ['patient-case-analysis', id],
+    queryFn: () => api.getPatientCaseAnalysis(id!),
+    enabled: !!id && activeTab === 'analysis',
   });
 
   const startWorkflowMutation = useMutation({
@@ -376,6 +386,7 @@ export default function PatientCaseDetail() {
       queryClient.invalidateQueries({ queryKey: ['patient-case-communications', id] });
       queryClient.invalidateQueries({ queryKey: ['patient-case-providers', id] });
       queryClient.invalidateQueries({ queryKey: ['patient-case-transcripts', id] });
+      queryClient.invalidateQueries({ queryKey: ['patient-case-analysis', id] });
     };
 
     socket.on('workflow-updated', handleWorkflowUpdate);
@@ -469,7 +480,7 @@ export default function PatientCaseDetail() {
         display: 'flex',
         gap: '2rem'
       }}>
-        {(['workflows', 'communications', 'providers', 'transcripts'] as const).map((tab) => (
+        {(['workflows', 'communications', 'providers', 'transcripts', 'analysis'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -584,39 +595,122 @@ export default function PatientCaseDetail() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {providers.map((provider: any) => (
                 <div key={provider.id} style={{
-                  padding: '1rem',
+                  padding: '1.5rem',
                   border: '1px solid #e5e5e5',
                   borderRadius: '6px'
                 }}>
-                  <h3 style={{ fontWeight: '500', marginBottom: '0.5rem' }}>{provider.name}</h3>
-                  {provider.specialty && (
-                    <p style={{ fontSize: '0.875rem', color: '#666' }}>Specialty: {provider.specialty}</p>
-                  )}
-                  {provider.contact_method && (
-                    <p style={{ fontSize: '0.875rem', color: '#666' }}>
-                      Contact: {provider.contact_method} - {provider.contact_info}
-                    </p>
-                  )}
-                  <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem' }}>
-                    <span style={{
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '4px',
-                      fontSize: '0.75rem',
-                      backgroundColor: provider.verified ? '#d1fae5' : '#f3f4f6',
-                      color: provider.verified ? '#065f46' : '#374151'
-                    }}>
-                      {provider.verified ? 'Verified' : 'Not Verified'}
-                    </span>
-                    <span style={{
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '4px',
-                      fontSize: '0.75rem',
-                      backgroundColor: provider.records_received ? '#d1fae5' : '#f3f4f6',
-                      color: provider.records_received ? '#065f46' : '#374151'
-                    }}>
-                      {provider.records_received ? 'Records Received' : 'Awaiting Records'}
-                    </span>
+                  {/* Provider Header */}
+                  <div style={{ marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid #e5e5e5' }}>
+                    <h3 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.25rem' }}>
+                      {provider.full_name || provider.name}
+                    </h3>
+                    <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                      {provider.provider_type && (
+                        <span style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          backgroundColor: '#dbeafe',
+                          color: '#1e40af'
+                        }}>
+                          {provider.provider_type}
+                        </span>
+                      )}
+                      {provider.role && (
+                        <span style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          backgroundColor: '#fef3c7',
+                          color: '#92400e'
+                        }}>
+                          {provider.role}
+                        </span>
+                      )}
+                      <span style={{
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        backgroundColor: provider.verified ? '#d1fae5' : '#f3f4f6',
+                        color: provider.verified ? '#065f46' : '#374151'
+                      }}>
+                        {provider.verified ? 'Verified' : 'Not Verified'}
+                      </span>
+                      <span style={{
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        backgroundColor: provider.records_received ? '#d1fae5' : '#f3f4f6',
+                        color: provider.records_received ? '#065f46' : '#374151'
+                      }}>
+                        {provider.records_received ? 'Records Received' : 'Awaiting Records'}
+                      </span>
+                    </div>
                   </div>
+
+                  {/* Provider Details Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem' }}>
+                    {provider.specialty && (
+                      <div>
+                        <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>Specialty</p>
+                        <p style={{ fontSize: '0.875rem', fontWeight: '500' }}>{provider.specialty}</p>
+                      </div>
+                    )}
+                    {provider.organization && (
+                      <div>
+                        <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>Organization</p>
+                        <p style={{ fontSize: '0.875rem', fontWeight: '500' }}>{provider.organization}</p>
+                      </div>
+                    )}
+                    {provider.phone_number && (
+                      <div>
+                        <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>Phone</p>
+                        <p style={{ fontSize: '0.875rem', fontWeight: '500' }}>{provider.phone_number}</p>
+                      </div>
+                    )}
+                    {provider.fax_number && (
+                      <div>
+                        <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>Fax</p>
+                        <p style={{ fontSize: '0.875rem', fontWeight: '500' }}>{provider.fax_number}</p>
+                      </div>
+                    )}
+                    {provider.npi && (
+                      <div>
+                        <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>NPI</p>
+                        <p style={{ fontSize: '0.875rem', fontWeight: '500' }}>{provider.npi}</p>
+                      </div>
+                    )}
+                    {(provider.city || provider.state) && (
+                      <div>
+                        <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>Location</p>
+                        <p style={{ fontSize: '0.875rem', fontWeight: '500' }}>
+                          {[provider.city, provider.state].filter(Boolean).join(', ')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Address - Full Width */}
+                  {provider.address && (
+                    <div style={{ marginTop: '1rem' }}>
+                      <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>Address</p>
+                      <p style={{ fontSize: '0.875rem', fontWeight: '500' }}>{provider.address}</p>
+                    </div>
+                  )}
+
+                  {/* Context in Case */}
+                  {provider.context_in_case && (
+                    <div style={{
+                      marginTop: '1rem',
+                      padding: '0.75rem',
+                      backgroundColor: '#f9fafb',
+                      borderRadius: '4px',
+                      borderLeft: '3px solid #3b82f6'
+                    }}>
+                      <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '0.25rem' }}>Role in Case</p>
+                      <p style={{ fontSize: '0.875rem', lineHeight: '1.6' }}>{provider.context_in_case}</p>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -670,6 +764,326 @@ export default function PatientCaseDetail() {
             </div>
           ) : (
             <p style={{ color: '#666' }}>No transcripts available yet.</p>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'analysis' && (
+        <div style={{
+          backgroundColor: '#fff',
+          borderRadius: '8px',
+          border: '1px solid #e5e5e5',
+          padding: '1.5rem'
+        }}>
+          <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>Claude Case Analysis</h2>
+          {analysis ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Quality Score - Always Visible */}
+              <div style={{
+                padding: '1.5rem',
+                backgroundColor: '#f9fafb',
+                border: '2px solid #e5e7eb',
+                borderRadius: '8px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <div>
+                    <p style={{ fontSize: '0.875rem', color: '#666', marginBottom: '0.25rem' }}>Quality Score</p>
+                    <p style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#2563eb' }}>
+                      {analysis.quality_score ? analysis.quality_score.toFixed(1) : 'N/A'}
+                    </p>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <p style={{ fontSize: '0.875rem', color: '#374151', lineHeight: '1.6' }}>
+                      {analysis.summary || 'No summary available'}
+                    </p>
+                  </div>
+                </div>
+                {analysis.medical_subject && (
+                  <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '1rem' }}>
+                    <strong>Medical Subject:</strong> {analysis.medical_subject}
+                  </p>
+                )}
+              </div>
+
+              {/* Core Scales */}
+              {analysis.core_scales && (
+                <details open style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Core Scales
+                  </summary>
+                  <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    {Object.entries(analysis.core_scales).map(([key, value]: [string, any]) => (
+                      <div key={key} style={{
+                        padding: '0.75rem',
+                        border: '1px solid #e5e5e5',
+                        borderRadius: '6px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                          <strong style={{ fontSize: '0.875rem' }}>
+                            {key.replace(/([A-Z])/g, ' $1').trim()}
+                          </strong>
+                          <span style={{
+                            fontSize: '1rem',
+                            fontWeight: 'bold',
+                            color: value?.score >= 7 ? '#10b981' : value?.score >= 4 ? '#f59e0b' : '#ef4444'
+                          }}>
+                            {value?.score || 'N/A'}/10
+                          </span>
+                        </div>
+                        <p style={{ fontSize: '0.875rem', color: '#666' }}>{value?.reasoning || 'No reasoning provided'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              {/* Patient Info */}
+              {analysis.patient_info && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Patient Information
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.patient_info, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Doctor Info Quality */}
+              {analysis.doctor_info_quality && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Doctor Information Quality
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.doctor_info_quality, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Case Factors */}
+              {analysis.case_factors && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Case Factors
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.case_factors, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Legal & Practical Factors */}
+              {analysis.legal_practical_factors && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Legal & Practical Factors
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.legal_practical_factors, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Call Quality Assessment */}
+              {analysis.call_quality_assessment && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Call Quality Assessment
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.call_quality_assessment, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Next Actions */}
+              {analysis.next_actions && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Next Actions
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.next_actions, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Compliance Notes */}
+              {analysis.compliance_notes && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Compliance Notes
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.compliance_notes, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Overall Case Assessment */}
+              {analysis.overall_case_assessment && (
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    padding: '0.75rem',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '6px',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Overall Case Assessment
+                  </summary>
+                  <div style={{ padding: '1rem' }}>
+                    <pre style={{
+                      backgroundColor: '#f9fafb',
+                      padding: '1rem',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                      overflow: 'auto',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {JSON.stringify(analysis.overall_case_assessment, null, 2)}
+                    </pre>
+                  </div>
+                </details>
+              )}
+
+              {/* Created timestamp */}
+              <p style={{ fontSize: '0.75rem', color: '#666', marginTop: '1rem', textAlign: 'right' }}>
+                Analysis created: {new Date(analysis.created_at).toLocaleString()}
+              </p>
+            </div>
+          ) : (
+            <p style={{ color: '#666' }}>No analysis available yet. The analysis will appear after a call is completed and analyzed.</p>
           )}
         </div>
       )}
