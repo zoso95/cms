@@ -44,12 +44,14 @@ export async function endToEndWorkflow(
   };
 
   log.info('Starting end-to-end medical records workflow', { patientCaseId, params: config });
+  await a.updateWorkflowStatus('Starting end-to-end medical records workflow');
 
   // ============================================
   // Phase 1: Patient Outreach (via child workflow)
   // ============================================
   await checkPaused();
   log.info('Phase 1: Patient Outreach', { patientCaseId });
+  await a.updateWorkflowStatus('Phase 1: Starting patient outreach');
 
   // Register child workflow before starting it
   const outreachWorkflowId = `patient-outreach-${patientCaseId}-${Date.now()}`;
@@ -67,9 +69,11 @@ export async function endToEndWorkflow(
   });
 
   log.info('Patient outreach completed', { patientCaseId, outreachResult });
+  await a.updateWorkflowStatus('Phase 1 complete: Patient outreach finished');
 
   // If patient didn't respond and didn't pick up, workflow ends
   if (!outreachResult.success) {
+    await a.updateWorkflowStatus('Workflow ended: No contact with patient');
     return { success: false, reason: 'no_contact', outreachResult };
   }
 
@@ -80,19 +84,24 @@ export async function endToEndWorkflow(
   // or reschedule (we'll handle those cases later with the transcript analysis)
   await checkPaused();
   log.info('Phase 2: Collecting and analyzing transcript', { patientCaseId });
+  await a.updateWorkflowStatus('Phase 2: Collecting call transcript');
 
   const transcript = await a.collectTranscript(patientCaseId);
   log.info('Transcript collected', { patientCaseId, transcriptLength: transcript.length });
 
+  await a.updateWorkflowStatus('Phase 2: Analyzing transcript with AI');
   const analysis = await a.analyzeTranscript(transcript);
   log.info('Transcript analyzed', { patientCaseId, analysis });
 
+  await a.updateWorkflowStatus('Phase 2: Extracting provider information');
   const providers = await a.extractProviders(analysis);
   log.info('Providers extracted', { patientCaseId, providerCount: providers.length, providers });
+  await a.updateWorkflowStatus(`Phase 2 complete: Found ${providers.length} provider(s)`);
 
   // 4️⃣ Parallelize provider subflows using child workflows
   await checkPaused();
   log.info('Phase 3: Processing provider records requests', { patientCaseId, providerCount: providers.length });
+  await a.updateWorkflowStatus(`Phase 3: Starting records retrieval for ${providers.length} provider(s)`);
 
   const retrievalResults = await Promise.all(
     providers.map(async (provider, index) => {
@@ -124,11 +133,14 @@ export async function endToEndWorkflow(
   );
 
   log.info('All provider records retrieved', { patientCaseId, providerCount: providers.length, retrievalResults });
+  await a.updateWorkflowStatus('Phase 3 complete: All records retrieval workflows started');
 
   await checkPaused();
   log.info('Phase 4: Running downstream analysis', { patientCaseId });
+  await a.updateWorkflowStatus('Phase 4: Running downstream analysis');
   await a.downstreamAnalysis(patientCaseId);
 
   log.info('Records workflow completed successfully', { patientCaseId });
+  await a.updateWorkflowStatus('Completed successfully: All phases finished');
   return { success: true, reason: 'completed', providerCount: providers.length };
 }

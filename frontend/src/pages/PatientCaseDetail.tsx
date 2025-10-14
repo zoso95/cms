@@ -65,6 +65,11 @@ function WorkflowCard({
               Completed: {new Date(workflow.completed_at).toLocaleString()}
             </p>
           )}
+          {workflow.status_message && (
+            <p style={{ fontSize: '0.875rem', color: '#2563eb', marginTop: '0.5rem', fontWeight: '500' }}>
+              Status: {workflow.status_message}
+            </p>
+          )}
           {workflow.error && (
             <div
               style={{

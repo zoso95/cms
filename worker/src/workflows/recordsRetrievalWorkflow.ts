@@ -35,21 +35,26 @@ export async function recordsRetrievalWorkflow(
   setupPauseHandlers();
 
   await checkPaused();
+  await a.updateWorkflowStatus(`Creating records request for ${provider}`);
   const requestId = await a.createRecordsRequest(provider);
   log.info('Records request created', { patientCaseId, provider, requestId });
 
   await checkPaused();
+  await a.updateWorkflowStatus('Waiting for patient signature');
   await a.waitForSignature(requestId);
   log.info('Signature received', { patientCaseId, provider, requestId });
 
   await checkPaused();
+  await a.updateWorkflowStatus(`Finding contact info for ${provider}`);
   const contact = await a.findDoctorOffice(provider);
   log.info('Doctor office contact found', { patientCaseId, provider, contact });
 
   await checkPaused();
+  await a.updateWorkflowStatus('Waiting for manual verification of contact');
   const verified = await a.manualVerify(contact);
   if (!verified) {
     log.error('Verification failed', { patientCaseId, provider, contact });
+    await a.updateWorkflowStatus(`Verification failed for ${provider}`);
     throw new Error('Verification failed for ' + provider);
   }
   log.info('Contact verified', { patientCaseId, provider });
@@ -58,13 +63,16 @@ export async function recordsRetrievalWorkflow(
   // Send request via fax or email
   if (contact.method === 'fax') {
     log.info('Sending fax', { patientCaseId, provider });
+    await a.updateWorkflowStatus(`Sending fax to ${provider}`);
     await a.sendFax(contact, requestId);
   } else {
     log.info('Sending email', { patientCaseId, provider });
+    await a.updateWorkflowStatus(`Sending email to ${provider}`);
     await a.sendEmail(contact, requestId);
   }
 
   await checkPaused();
+  await a.updateWorkflowStatus('Request sent, waiting for records');
   let followUpAttempts = 0;
   /*
   // Wait for records with optional follow-ups
@@ -111,9 +119,11 @@ export async function recordsRetrievalWorkflow(
 
   await checkPaused();
   log.info('Ingesting records', { patientCaseId, provider });
+  await a.updateWorkflowStatus(`Ingesting records from ${provider}`);
   await a.ingestRecords(provider);
 
   log.info('Records retrieval workflow completed', { patientCaseId, provider });
+  await a.updateWorkflowStatus(`Completed: Records from ${provider} retrieved successfully`);
   return {
     success: true,
     requestId,

@@ -564,3 +564,20 @@ export async function logFailure(patientCaseId: number, reason: string): Promise
     })
     .eq('id', workflowExecutionId);
 }
+
+// ============================================
+// Status Update Activities
+// ============================================
+export async function updateWorkflowStatus(statusMessage: string): Promise<void> {
+  const info = Context.current().info;
+  const workflowId = info.workflowExecution.workflowId;
+
+  console.log(`[Activity] Updating workflow status: ${workflowId} -> ${statusMessage}`);
+
+  await supabase
+    .from('workflow_executions')
+    .update({
+      status_message: statusMessage,
+    })
+    .eq('workflow_id', workflowId);
+}
