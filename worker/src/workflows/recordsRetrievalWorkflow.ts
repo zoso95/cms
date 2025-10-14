@@ -1,6 +1,7 @@
 import { proxyActivities, sleep, log } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { RecordsRetrievalParams } from './registry';
+import { setupPauseHandlers, checkPaused } from '../utils/pauseResume';
 
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
@@ -30,15 +31,22 @@ export async function recordsRetrievalWorkflow(
 ): Promise<RecordsRetrievalResult> {
   log.info('Starting records retrieval workflow', { patientCaseId, provider, params });
 
+  // Set up pause/resume handlers
+  setupPauseHandlers();
+
+  await checkPaused();
   const requestId = await a.createRecordsRequest(provider);
   log.info('Records request created', { patientCaseId, provider, requestId });
 
+  await checkPaused();
   await a.waitForSignature(requestId);
   log.info('Signature received', { patientCaseId, provider, requestId });
 
+  await checkPaused();
   const contact = await a.findDoctorOffice(provider);
   log.info('Doctor office contact found', { patientCaseId, provider, contact });
 
+  await checkPaused();
   const verified = await a.manualVerify(contact);
   if (!verified) {
     log.error('Verification failed', { patientCaseId, provider, contact });
@@ -46,6 +54,7 @@ export async function recordsRetrievalWorkflow(
   }
   log.info('Contact verified', { patientCaseId, provider });
 
+  await checkPaused();
   // Send request via fax or email
   if (contact.method === 'fax') {
     log.info('Sending fax', { patientCaseId, provider });
@@ -55,6 +64,9 @@ export async function recordsRetrievalWorkflow(
     await a.sendEmail(contact, requestId);
   }
 
+  await checkPaused();
+  let followUpAttempts = 0;
+  /*
   // Wait for records with optional follow-ups
   let followUpAttempts = 0;
   let recordsReceived = false;
@@ -95,7 +107,9 @@ export async function recordsRetrievalWorkflow(
       }
     }
   }
+  */
 
+  await checkPaused();
   log.info('Ingesting records', { patientCaseId, provider });
   await a.ingestRecords(provider);
 

@@ -642,6 +642,100 @@ app.post('/api/workflows/:workflowId/signal', async (req, res) => {
   }
 });
 
+// Pause workflow
+app.post('/api/workflows/:workflowId/pause', async (req, res) => {
+  try {
+    const { workflowId } = req.params;
+
+    const client = await getTemporalClient();
+    const handle = client.workflow.getHandle(workflowId);
+
+    // Send pause signal
+    await handle.signal('pause');
+
+    // Update database
+    await supabase
+      .from('workflow_executions')
+      .update({ paused: true })
+      .eq('workflow_id', workflowId);
+
+    // Get child workflows
+    const { data: children } = await supabase
+      .from('workflow_executions')
+      .select('workflow_id')
+      .eq('parent_workflow_id', workflowId)
+      .eq('status', 'running');
+
+    // Pause all children
+    if (children && children.length > 0) {
+      for (const child of children) {
+        try {
+          const childHandle = client.workflow.getHandle(child.workflow_id);
+          await childHandle.signal('pause');
+
+          await supabase
+            .from('workflow_executions')
+            .update({ paused: true })
+            .eq('workflow_id', child.workflow_id);
+        } catch (error) {
+          console.error(`Failed to pause child ${child.workflow_id}:`, error);
+        }
+      }
+    }
+
+    res.json({ success: true, childrenPaused: children?.length || 0 });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Resume workflow
+app.post('/api/workflows/:workflowId/resume', async (req, res) => {
+  try {
+    const { workflowId } = req.params;
+
+    const client = await getTemporalClient();
+    const handle = client.workflow.getHandle(workflowId);
+
+    // Send resume signal
+    await handle.signal('resume');
+
+    // Update database
+    await supabase
+      .from('workflow_executions')
+      .update({ paused: false })
+      .eq('workflow_id', workflowId);
+
+    // Get child workflows
+    const { data: children } = await supabase
+      .from('workflow_executions')
+      .select('workflow_id')
+      .eq('parent_workflow_id', workflowId)
+      .eq('status', 'running');
+
+    // Resume all children
+    if (children && children.length > 0) {
+      for (const child of children) {
+        try {
+          const childHandle = client.workflow.getHandle(child.workflow_id);
+          await childHandle.signal('resume');
+
+          await supabase
+            .from('workflow_executions')
+            .update({ paused: false })
+            .eq('workflow_id', child.workflow_id);
+        } catch (error) {
+          console.error(`Failed to resume child ${child.workflow_id}:`, error);
+        }
+      }
+    }
+
+    res.json({ success: true, childrenResumed: children?.length || 0 });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Stop/terminate workflow
 app.post('/api/workflows/:workflowId/stop', async (req, res) => {
   try {

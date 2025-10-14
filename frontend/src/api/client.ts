@@ -35,6 +35,14 @@ export const api = {
     apiRequest<{ success: boolean }>(`/workflows/${workflowId}/stop`, {
       method: 'POST',
     }),
+  pauseWorkflow: (workflowId: string) =>
+    apiRequest<{ success: boolean; childrenPaused: number }>(`/workflows/${workflowId}/pause`, {
+      method: 'POST',
+    }),
+  resumeWorkflow: (workflowId: string) =>
+    apiRequest<{ success: boolean; childrenResumed: number }>(`/workflows/${workflowId}/resume`, {
+      method: 'POST',
+    }),
   deleteWorkflow: (executionId: string) =>
     apiRequest<{ success: boolean }>(`/workflows/${executionId}`, {
       method: 'DELETE',

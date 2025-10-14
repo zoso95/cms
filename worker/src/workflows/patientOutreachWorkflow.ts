@@ -1,6 +1,7 @@
 import { proxyActivities, sleep, condition, defineSignal, setHandler, log } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { PatientOutreachParams } from './registry';
+import { setupPauseHandlers, checkPaused } from '../utils/pauseResume';
 
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
@@ -43,6 +44,9 @@ export async function patientOutreachWorkflow(
 ): Promise<PatientOutreachResult> {
   log.info('Starting patient outreach workflow', { patientCaseId, params });
 
+  // Set up pause/resume handlers
+  setupPauseHandlers();
+
   let pickedUp = false;
   let userResponded: UserResponse | null = null;
   let attemptCount = 0;
@@ -62,13 +66,22 @@ export async function patientOutreachWorkflow(
 
   // Try to reach the customer (SMS + call, up to maxAttempts)
   for (let i = 0; i < params.maxAttempts && !pickedUp && !userResponded; i++) {
+    // Check if workflow is paused before each attempt
+    await checkPaused();
+
     attemptCount = i + 1;
     log.info(`Attempt ${i + 1}/${params.maxAttempts} to reach patient`, { patientCaseId });
 
     await a.sendSMS(patientCaseId, params.smsTemplate);
 
+    // Check pause state before waiting
+    await checkPaused();
+
     // Wait 1 minute before calling to give patient time to see the SMS
     await sleep('1 minute');
+
+    // Check pause state before making call
+    await checkPaused();
 
     // Initiate call (non-blocking)
     const conversationId = await a.placeCall(patientCaseId);

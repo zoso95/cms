@@ -10,15 +10,23 @@ function WorkflowCard({
   workflow,
   isChild = false,
   stopWorkflow,
+  pauseWorkflow,
+  resumeWorkflow,
   deleteWorkflow,
   isStoppingWorkflow,
+  isPausingWorkflow,
+  isResumingWorkflow,
   isDeletingWorkflow,
 }: {
   workflow: any;
   isChild?: boolean;
   stopWorkflow: (workflowId: string) => void;
+  pauseWorkflow: (workflowId: string) => void;
+  resumeWorkflow: (workflowId: string) => void;
   deleteWorkflow: (executionId: string) => void;
   isStoppingWorkflow: boolean;
+  isPausingWorkflow: boolean;
+  isResumingWorkflow: boolean;
   isDeletingWorkflow: boolean;
 }) {
   return (
@@ -110,7 +118,43 @@ function WorkflowCard({
           {workflow.status}
         </span>
       </div>
-      <div style={{ display: 'flex', gap: '0.5rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+        {workflow.status === 'running' && !workflow.paused && (
+          <button
+            onClick={() => pauseWorkflow(workflow.workflow_id)}
+            disabled={isPausingWorkflow}
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: '#f59e0b',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '0.875rem',
+              cursor: 'pointer',
+              fontWeight: '500',
+            }}
+          >
+            {isPausingWorkflow ? 'Pausing...' : 'Pause'}
+          </button>
+        )}
+        {workflow.status === 'running' && workflow.paused && (
+          <button
+            onClick={() => resumeWorkflow(workflow.workflow_id)}
+            disabled={isResumingWorkflow}
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: '#10b981',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              fontSize: '0.875rem',
+              cursor: 'pointer',
+              fontWeight: '500',
+            }}
+          >
+            {isResumingWorkflow ? 'Resuming...' : 'Resume'}
+          </button>
+        )}
         {workflow.status === 'running' && (
           <button
             onClick={() => stopWorkflow(workflow.workflow_id)}
@@ -126,7 +170,7 @@ function WorkflowCard({
               fontWeight: '500',
             }}
           >
-            {isStoppingWorkflow ? 'Stopping...' : 'Stop Workflow'}
+            {isStoppingWorkflow ? 'Stopping...' : 'Stop'}
           </button>
         )}
         <button
@@ -147,7 +191,7 @@ function WorkflowCard({
             fontWeight: '500',
           }}
         >
-          {isDeletingWorkflow ? 'Deleting...' : 'Delete Record'}
+          {isDeletingWorkflow ? 'Deleting...' : 'Delete'}
         </button>
       </div>
     </div>
@@ -158,14 +202,22 @@ function WorkflowCard({
 function WorkflowHierarchy({
   workflows,
   stopWorkflow,
+  pauseWorkflow,
+  resumeWorkflow,
   deleteWorkflow,
   isStoppingWorkflow,
+  isPausingWorkflow,
+  isResumingWorkflow,
   isDeletingWorkflow,
 }: {
   workflows: any[];
   stopWorkflow: (workflowId: string) => void;
+  pauseWorkflow: (workflowId: string) => void;
+  resumeWorkflow: (workflowId: string) => void;
   deleteWorkflow: (executionId: string) => void;
   isStoppingWorkflow: boolean;
+  isPausingWorkflow: boolean;
+  isResumingWorkflow: boolean;
   isDeletingWorkflow: boolean;
 }) {
   // Separate parent workflows from children
@@ -191,8 +243,12 @@ function WorkflowHierarchy({
             workflow={parent}
             isChild={false}
             stopWorkflow={stopWorkflow}
+            pauseWorkflow={pauseWorkflow}
+            resumeWorkflow={resumeWorkflow}
             deleteWorkflow={deleteWorkflow}
             isStoppingWorkflow={isStoppingWorkflow}
+            isPausingWorkflow={isPausingWorkflow}
+            isResumingWorkflow={isResumingWorkflow}
             isDeletingWorkflow={isDeletingWorkflow}
           />
 
@@ -203,8 +259,12 @@ function WorkflowHierarchy({
               workflow={child}
               isChild={true}
               stopWorkflow={stopWorkflow}
+              pauseWorkflow={pauseWorkflow}
+              resumeWorkflow={resumeWorkflow}
               deleteWorkflow={deleteWorkflow}
               isStoppingWorkflow={isStoppingWorkflow}
+              isPausingWorkflow={isPausingWorkflow}
+              isResumingWorkflow={isResumingWorkflow}
               isDeletingWorkflow={isDeletingWorkflow}
             />
           ))}
@@ -262,6 +322,20 @@ export default function PatientCaseDetail() {
 
   const stopWorkflowMutation = useMutation({
     mutationFn: (workflowId: string) => api.stopWorkflow(workflowId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['patient-case-workflows', id] });
+    },
+  });
+
+  const pauseWorkflowMutation = useMutation({
+    mutationFn: (workflowId: string) => api.pauseWorkflow(workflowId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['patient-case-workflows', id] });
+    },
+  });
+
+  const resumeWorkflowMutation = useMutation({
+    mutationFn: (workflowId: string) => api.resumeWorkflow(workflowId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['patient-case-workflows', id] });
     },
@@ -424,8 +498,12 @@ export default function PatientCaseDetail() {
             <WorkflowHierarchy
               workflows={workflows}
               stopWorkflow={stopWorkflowMutation.mutate}
+              pauseWorkflow={pauseWorkflowMutation.mutate}
+              resumeWorkflow={resumeWorkflowMutation.mutate}
               deleteWorkflow={deleteWorkflowMutation.mutate}
               isStoppingWorkflow={stopWorkflowMutation.isPending}
+              isPausingWorkflow={pauseWorkflowMutation.isPending}
+              isResumingWorkflow={resumeWorkflowMutation.isPending}
               isDeletingWorkflow={deleteWorkflowMutation.isPending}
             />
           ) : (

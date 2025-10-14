@@ -1,8 +1,9 @@
-import { proxyActivities, executeChild, log } from '@temporalio/workflow';
+import { proxyActivities, executeChild, log, getExternalWorkflowHandle } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { recordsRetrievalWorkflow } from './recordsRetrievalWorkflow';
 import { patientOutreachWorkflow } from './patientOutreachWorkflow';
 import { RecordsWorkflowParams } from './registry';
+import { setupPauseHandlers, checkPaused, pauseSignal, resumeSignal } from '../utils/pauseResume';
 
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
@@ -21,6 +22,9 @@ export async function endToEndWorkflow(
   patientCaseId: number,
   params?: Partial<RecordsWorkflowParams>
 ) {
+  // Set up pause/resume handlers with child propagation
+  setupPauseHandlers();
+
   // Apply defaults
   const config: RecordsWorkflowParams = {
     patientOutreach: {
@@ -44,6 +48,7 @@ export async function endToEndWorkflow(
   // ============================================
   // Phase 1: Patient Outreach (via child workflow)
   // ============================================
+  await checkPaused();
   log.info('Phase 1: Patient Outreach', { patientCaseId });
 
   // Register child workflow before starting it
@@ -73,6 +78,7 @@ export async function endToEndWorkflow(
   // ============================================
   // Note: If user texted back, we still continue - they may be trying to opt out
   // or reschedule (we'll handle those cases later with the transcript analysis)
+  await checkPaused();
   log.info('Phase 2: Collecting and analyzing transcript', { patientCaseId });
 
   const transcript = await a.collectTranscript(patientCaseId);
@@ -85,6 +91,7 @@ export async function endToEndWorkflow(
   log.info('Providers extracted', { patientCaseId, providerCount: providers.length, providers });
 
   // 4️⃣ Parallelize provider subflows using child workflows
+  await checkPaused();
   log.info('Phase 3: Processing provider records requests', { patientCaseId, providerCount: providers.length });
 
   const retrievalResults = await Promise.all(
@@ -118,6 +125,7 @@ export async function endToEndWorkflow(
 
   log.info('All provider records retrieved', { patientCaseId, providerCount: providers.length, retrievalResults });
 
+  await checkPaused();
   log.info('Phase 4: Running downstream analysis', { patientCaseId });
   await a.downstreamAnalysis(patientCaseId);
 
