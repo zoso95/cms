@@ -6,6 +6,7 @@ import nodemailer from 'nodemailer';
 import { openphone } from './services/openphone';
 import { elevenlabs } from './services/elevenlabs';
 import { normalizePhoneNumber } from './utils/phone';
+import { buildDynamicVariables } from './utils/dynamicVariables';
 
 // Lazy-initialize Twilio client
 let twilioClient: ReturnType<typeof twilio> | null = null;
@@ -157,15 +158,17 @@ export async function placeCall(patientCaseId: number): Promise<string> {
     throw new Error('ELEVENLABS_AGENT_ID not configured');
   }
 
+  // Build dynamic variables with patient context
+  console.log(`[Activity] Building dynamic variables for patient case ${patientCaseId}...`);
+  const dynamicVariables = await buildDynamicVariables(patientCaseId, workflowId);
+  console.log(`[Activity] Built ${Object.keys(dynamicVariables).length} dynamic variables`);
+
   // Initiate call via ElevenLabs
   console.log(`[Activity] Initiating ElevenLabs call to ${normalizedPhone}...`);
   const callResult = await elevenlabs.makeCall({
     toNumber: normalizedPhone,
     agentId,
-    dynamicVariables: {
-      patient_case_id: patientCaseId.toString(),
-      workflow_id: workflowId,
-    },
+    dynamicVariables,
   });
 
   if (!callResult.success) {

@@ -1,5 +1,5 @@
 import { config } from 'dotenv';
-import { elevenlabs } from './services/elevenlabs';
+import { elevenlabs } from '../services/elevenlabs';
 
 // Load environment variables
 config();

@@ -1,5 +1,5 @@
 import { config } from 'dotenv';
-import { supabase } from './db';
+import { supabase } from '../db';
 
 config();
 
@@ -54,7 +54,7 @@ async function testCallFailure() {
       throw new Error(`Failed to start workflow: ${error}`);
     }
 
-    const result = await response.json();
+    const result = await response.json() as any;
     console.log(`✅ Workflow started!`);
     console.log(`   Workflow ID: ${result.workflowId}`);
     console.log(`   Run ID: ${result.runId}`);
