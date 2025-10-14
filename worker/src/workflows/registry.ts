@@ -18,7 +18,7 @@ export const CallParamsSchema = z.object({
   maxDuration: z.number().default(300), // seconds
 });
 
-export const RecordsWorkflowParamsSchema = z.object({
+export const EndToEndWorkflowParamsSchema = z.object({
   patientOutreach: PatientOutreachParamsSchema,
   recordsRetrieval: RecordsRetrievalParamsSchema,
   call: CallParamsSchema,
@@ -28,7 +28,7 @@ export const RecordsWorkflowParamsSchema = z.object({
 export type PatientOutreachParams = z.infer<typeof PatientOutreachParamsSchema>;
 export type RecordsRetrievalParams = z.infer<typeof RecordsRetrievalParamsSchema>;
 export type CallParams = z.infer<typeof CallParamsSchema>;
-export type RecordsWorkflowParams = z.infer<typeof RecordsWorkflowParamsSchema>;
+export type EndToEndWorkflowParams = z.infer<typeof EndToEndWorkflowParamsSchema>;
 
 // Workflow metadata
 export interface WorkflowMetadata {
@@ -47,7 +47,7 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     displayName: 'End-to-End Medical Records',
     description: 'Complete workflow: patient outreach, transcript collection, provider records retrieval, and downstream analysis',
     category: 'production',
-    parameters: RecordsWorkflowParamsSchema,
+    parameters: EndToEndWorkflowParamsSchema,
     defaultParams: {
       patientOutreach: {
         maxAttempts: 7,

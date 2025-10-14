@@ -253,21 +253,23 @@ function WorkflowHierarchy({
           />
 
           {/* Child workflows */}
-          {childrenByParent[parent.workflow_id]?.map((child) => (
-            <WorkflowCard
-              key={child.id}
-              workflow={child}
-              isChild={true}
-              stopWorkflow={stopWorkflow}
-              pauseWorkflow={pauseWorkflow}
-              resumeWorkflow={resumeWorkflow}
-              deleteWorkflow={deleteWorkflow}
-              isStoppingWorkflow={isStoppingWorkflow}
-              isPausingWorkflow={isPausingWorkflow}
-              isResumingWorkflow={isResumingWorkflow}
-              isDeletingWorkflow={isDeletingWorkflow}
-            />
-          ))}
+          {childrenByParent[parent.workflow_id]
+            ?.sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
+            .map((child) => (
+              <WorkflowCard
+                key={child.id}
+                workflow={child}
+                isChild={true}
+                stopWorkflow={stopWorkflow}
+                pauseWorkflow={pauseWorkflow}
+                resumeWorkflow={resumeWorkflow}
+                deleteWorkflow={deleteWorkflow}
+                isStoppingWorkflow={isStoppingWorkflow}
+                isPausingWorkflow={isPausingWorkflow}
+                isResumingWorkflow={isResumingWorkflow}
+                isDeletingWorkflow={isDeletingWorkflow}
+              />
+            ))}
         </div>
       ))}
     </div>

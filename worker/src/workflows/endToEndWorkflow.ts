@@ -2,7 +2,7 @@ import { proxyActivities, executeChild, log, getExternalWorkflowHandle } from '@
 import type * as activities from '../activities';
 import { recordsRetrievalWorkflow } from './recordsRetrievalWorkflow';
 import { patientOutreachWorkflow } from './patientOutreachWorkflow';
-import { RecordsWorkflowParams } from './registry';
+import { EndToEndWorkflowParams } from './registry';
 import { setupPauseHandlers, checkPaused, pauseSignal, resumeSignal } from '../utils/pauseResume';
 
 const a = proxyActivities<typeof activities>({
@@ -20,13 +20,13 @@ const a = proxyActivities<typeof activities>({
  */
 export async function endToEndWorkflow(
   patientCaseId: number,
-  params?: Partial<RecordsWorkflowParams>
+  params?: Partial<EndToEndWorkflowParams>
 ) {
   // Set up pause/resume handlers with child propagation
   setupPauseHandlers();
 
   // Apply defaults
-  const config: RecordsWorkflowParams = {
+  const config: EndToEndWorkflowParams = {
     patientOutreach: {
       maxAttempts: params?.patientOutreach?.maxAttempts ?? 7,
       waitBetweenAttempts: params?.patientOutreach?.waitBetweenAttempts ?? '1 day',
