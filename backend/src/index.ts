@@ -91,6 +91,16 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
 
     const { type, data } = webhookData;
 
+    // Log webhook event to database (before processing)
+    const webhookEventId = uuidv4();
+    await supabase.from('webhook_events').insert({
+      id: webhookEventId,
+      event_type: `elevenlabs:${type}`,
+      payload: webhookData,
+      processed: false,
+    });
+    console.log(`✅ Logged webhook event ${webhookEventId} to database`);
+
     switch (type) {
       case 'post_call_transcription':
         console.log(`🏁 Post-call transcription received for conversation: ${data.conversation_id}`);
@@ -106,8 +116,19 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
 
         if (!callRecord) {
           console.error(`❌ No call record found for conversation ${data.conversation_id}`);
+          // Mark webhook as processed with error
+          await supabase.from('webhook_events').update({
+            processed: true,
+            workflow_execution_id: null,
+          }).eq('id', webhookEventId);
           return res.status(404).json({ error: 'Call record not found' });
         }
+
+        // Update webhook event with related IDs
+        await supabase.from('webhook_events').update({
+          patient_case_id: callRecord.patient_case_id,
+          workflow_execution_id: callRecord.id,
+        }).eq('id', webhookEventId);
 
         // Extract whether human was reached from evaluation criteria
         // ElevenLabs returns: { talked_to_a_human: { result: "success" | "failure", ... } }
@@ -155,6 +176,28 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
 
         console.log(`✅ Updated call record ${callRecord.id} - talked_to_human: ${talkedToHuman}`);
 
+        // Log to communication_logs
+        await supabase
+          .from('communication_logs')
+          .insert({
+            id: uuidv4(),
+            patient_case_id: callRecord.patient_case_id,
+            workflow_execution_id: callRecord.id,
+            type: 'call',
+            direction: 'outbound',
+            status: 'completed',
+            content: transcriptText,
+            metadata: {
+              conversation_id: data.conversation_id,
+              call_sid: callRecord.call_sid,
+              duration_seconds: data.metadata?.call_duration_secs || 0,
+              talked_to_human: talkedToHuman,
+              variables_collected: collectedVariables,
+            },
+          });
+
+        console.log(`✅ Logged call completion to communication_logs`);
+
         // Send signal to workflow
         try {
           const client = await getTemporalClient();
@@ -171,6 +214,11 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
           console.error(`❌ Failed to send signal to workflow: ${error.message}`);
           // Don't fail the webhook - the workflow will fall back to polling
         }
+
+        // Mark webhook as successfully processed
+        await supabase.from('webhook_events').update({
+          processed: true,
+        }).eq('id', webhookEventId);
 
         break;
 
@@ -198,8 +246,18 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
 
         if (!failedCall) {
           console.error(`❌ No call record found for failed conversation ${data.conversation_id}`);
+          // Mark webhook as processed with error
+          await supabase.from('webhook_events').update({
+            processed: true,
+          }).eq('id', webhookEventId);
           return res.status(404).json({ error: 'Call record not found' });
         }
+
+        // Update webhook event with related IDs
+        await supabase.from('webhook_events').update({
+          patient_case_id: failedCall.patient_case_id,
+          workflow_execution_id: failedCall.id,
+        }).eq('id', webhookEventId);
 
         // Update the call record to mark it as failed
         const { error: failureUpdateError } = await supabase
@@ -223,6 +281,27 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
 
         console.log(`✅ Marked call ${failedCall.id} as failed (${data.failure_reason})`);
 
+        // Log to communication_logs
+        await supabase
+          .from('communication_logs')
+          .insert({
+            id: uuidv4(),
+            patient_case_id: failedCall.patient_case_id,
+            workflow_execution_id: failedCall.id,
+            type: 'call',
+            direction: 'outbound',
+            status: 'failed',
+            content: `Call failed: ${data.failure_reason}`,
+            metadata: {
+              conversation_id: data.conversation_id,
+              call_sid: failedCall.call_sid,
+              failure_reason: data.failure_reason,
+              failure_metadata: data.metadata,
+            },
+          });
+
+        console.log(`✅ Logged call failure to communication_logs`);
+
         // Send signal to workflow
         try {
           const client = await getTemporalClient();
@@ -241,15 +320,35 @@ app.post('/api/webhooks/elevenlabs/conversation', express.raw({ type: '*/*' }), 
           // Don't fail the webhook - the workflow will fall back to polling
         }
 
+        // Mark webhook as successfully processed
+        await supabase.from('webhook_events').update({
+          processed: true,
+        }).eq('id', webhookEventId);
+
         break;
 
       default:
         console.log(`📋 Unknown event type: ${type}`);
+        // Mark webhook as processed (even though we don't handle it)
+        await supabase.from('webhook_events').update({
+          processed: true,
+        }).eq('id', webhookEventId);
     }
 
     res.status(200).json({ status: 'success' });
   } catch (error: any) {
     console.error('Error handling ElevenLabs webhook:', error);
+
+    // Try to mark webhook as processed with error if we have the ID
+    try {
+      const webhookData = JSON.parse(req.body.toString());
+      await supabase.from('webhook_events').update({
+        processed: true,
+      }).where('event_type', 'like', 'elevenlabs:%').order('created_at', { ascending: false }).limit(1);
+    } catch (updateError) {
+      console.error('Failed to update webhook event:', updateError);
+    }
+
     res.status(500).json({ error: error.message });
   }
 });
