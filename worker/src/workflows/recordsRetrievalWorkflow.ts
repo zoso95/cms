@@ -6,6 +6,9 @@ import { setupPauseHandlers, checkPaused } from '../utils/pauseResume';
 // Define verification signal
 export const verificationCompleteSignal = defineSignal<[boolean, any?]>('verificationComplete');
 
+// Define fax completion signal
+export const faxCompletedSignal = defineSignal<[{ success: boolean; faxId: string; error?: string }]>('faxCompleted');
+
 // Short-running activities (status updates, quick DB queries)
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
@@ -144,11 +147,49 @@ export async function recordsRetrievalWorkflow(
   if (contact.method === 'fax') {
     log.info('Sending fax', { patientCaseId, provider });
     await a.updateWorkflowStatus(`Sending fax to ${provider}`);
-    await longActivities.sendFax(contact, requestId);
+    const faxId = await longActivities.sendFax(patientCaseId, contact, requestId);
+    log.info('Fax sent, waiting for delivery confirmation', { patientCaseId, provider, faxId });
+
+    // Wait for fax completion signal from webhook
+    await a.updateWorkflowStatus(`Waiting for fax delivery confirmation`);
+    let faxSuccess = false;
+    let faxFailed = false;
+    let faxError: string | undefined;
+
+    setHandler(faxCompletedSignal, (result: { success: boolean; faxId: string; error?: string }) => {
+      log.info('Received fax completion signal', { result });
+      if (result.success) {
+        faxSuccess = true;
+      } else {
+        faxFailed = true;
+        faxError = result.error;
+      }
+    });
+
+    // Wait for signal (with timeout of 30 minutes - HumbleFax usually completes within this time)
+    const faxTimeout = condition(() => faxSuccess || faxFailed, '30 minutes');
+    const faxCompleted = await faxTimeout;
+
+    if (!faxCompleted) {
+      log.error('Fax delivery confirmation timed out', { patientCaseId, provider, faxId });
+      await a.updateWorkflowStatus(`Fax delivery confirmation timed out`);
+      throw new Error(`Fax delivery confirmation timed out after 30 minutes`);
+    }
+
+    if (faxFailed) {
+      log.error('Fax delivery failed', { patientCaseId, provider, faxId, error: faxError });
+      await a.updateWorkflowStatus(`Fax delivery failed: ${faxError}`);
+      throw new Error(`Fax delivery failed: ${faxError}`);
+    }
+
+    log.info('Fax delivered successfully', { patientCaseId, provider, faxId });
+    await a.updateWorkflowStatus(`Fax delivered successfully to ${provider}`);
   } else {
     log.info('Sending email', { patientCaseId, provider });
     await a.updateWorkflowStatus(`Sending email to ${provider}`);
-    await longActivities.sendEmail(contact, requestId);
+    await longActivities.sendRecordsEmail(patientCaseId, contact, requestId);
+    // Email delivery is immediate, no need to wait for confirmation
+    log.info('Email sent successfully', { patientCaseId, provider });
   }
 
   await checkPaused();
@@ -195,7 +236,6 @@ export async function recordsRetrievalWorkflow(
       }
     }
   }
-  */
 
   await checkPaused();
   log.info('Ingesting records', { patientCaseId, provider });
@@ -204,6 +244,8 @@ export async function recordsRetrievalWorkflow(
 
   log.info('Records retrieval workflow completed', { patientCaseId, provider });
   await a.updateWorkflowStatus(`Completed: Records from ${provider} retrieved successfully`);
+  */
+ await a.updateWorkflowStatus(`Completed: Records successfully sent`);
   return {
     success: true,
     requestId,

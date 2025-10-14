@@ -12,6 +12,7 @@ import { claude } from './services/claude';
 import { openSignService } from './services/opensign';
 import { mailgunService } from './services/mailgun';
 import { npiService } from './services/npi';
+import { humbleFaxService } from './services/humblefax';
 
 // Lazy-initialize Twilio client
 let twilioClient: ReturnType<typeof twilio> | null = null;
@@ -79,16 +80,22 @@ async function logCommunication(
 }
 
 async function getWorkflowExecutionIdFromDb(patientCaseId: number): Promise<string> {
+  // Get the current workflow ID from the activity context
+  const info = Context.current().info;
+  const currentWorkflowId = info.workflowExecution.workflowId;
+
+  // Look up the workflow execution by the current workflow ID
   const { data, error } = await supabase
     .from('workflow_executions')
     .select('id')
-    .eq('patient_case_id', patientCaseId)
-    .eq('status', 'running')
-    .order('started_at', { ascending: false })
-    .limit(1)
+    .eq('workflow_id', currentWorkflowId)
     .single();
 
-  if (error || !data) throw new Error('No running workflow found for patient case');
+  if (error || !data) {
+    console.error(`[Activity] Failed to find workflow execution for workflow_id: ${currentWorkflowId}`, error);
+    throw new Error(`No workflow execution found for workflow ${currentWorkflowId}`);
+  }
+
   return data.id;
 }
 
@@ -967,23 +974,222 @@ export async function findDoctorOffice(
 }
 
 export async function sendFax(
+  patientCaseId: number,
   contact: { name: string; contact: string },
   requestId: string
-): Promise<void> {
+): Promise<string> {
   console.log(`[Activity] Sending fax to ${contact.name} at ${contact.contact}`);
 
-  // In a real implementation, use a fax API
-  await new Promise(resolve => setTimeout(resolve, 100));
+  // Get patient case information to construct reply-to email
+  const { data: patientCase, error: caseError } = await supabase
+    .from('patient_cases')
+    .select('first_name, last_name, email')
+    .eq('id', patientCaseId)
+    .single();
+
+  if (caseError) throw caseError;
+
+  // Construct reply-to email: records+{firstname}.{lastname}@havencresthealth.com
+  const firstName = (patientCase.first_name || '').toLowerCase().replace(/\s+/g, '');
+  const lastName = (patientCase.last_name || '').toLowerCase().replace(/\s+/g, '');
+  const replyToEmail = `records+${firstName}.${lastName}@havencresthealth.com`;
+
+  console.log(`[Activity] Reply-to email: ${replyToEmail}`);
+
+  // Download signed authorization document
+  console.log(`[Activity] Downloading signed authorization document ${requestId}`);
+  const pdfBuffer = await openSignService.downloadSignedDocument(requestId);
+
+  if (!pdfBuffer) {
+    throw new Error(`Failed to download signed document ${requestId}`);
+  }
+
+  console.log(`[Activity] Downloaded authorization document, size: ${pdfBuffer.length} bytes`);
+
+  // Construct coversheet message with reply instructions
+  const coversheetMessage = `
+Medical Records Request
+
+Patient: ${patientCase.first_name} ${patientCase.last_name}
+
+Please send the requested medical records to:
+${replyToEmail}
+
+Or reply via fax to the number shown on this coversheet.
+
+Attached is the signed patient authorization form.
+
+Thank you,
+Havencrest Health
+  `.trim();
+
+  // Send fax via HumbleFax
+  const result = await humbleFaxService.sendFax({
+    recipients: [contact.contact],
+    files: [{
+      filename: `authorization-${requestId}.pdf`,
+      data: pdfBuffer
+    }],
+    includeCoversheet: true,
+    subject: `Medical Records Request - ${patientCase.first_name} ${patientCase.last_name}`,
+    message: coversheetMessage
+  });
+
+  if (!result.success) {
+    throw new Error(`Failed to send fax: ${result.error}`);
+  }
+
+  console.log(`[Activity] Fax sent successfully! Fax ID: ${result.faxId}`);
+
+  // Log to communication logs
+  await logCommunication(
+    patientCaseId,
+    'fax',
+    'outbound',
+    'sent',
+    `Fax sent to ${contact.name} with medical records authorization`,
+    {
+      fax_id: result.faxId,
+      fax_number: contact.contact,
+      provider_name: contact.name,
+      authorization_document_id: requestId,
+      reply_to_email: replyToEmail
+    }
+  );
+
+  return result.faxId!;
 }
 
-export async function sendEmail(
+export async function sendRecordsEmail(
+  patientCaseId: number,
   contact: { name: string; contact: string },
   requestId: string
-): Promise<void> {
-  console.log(`[Activity] Sending email to ${contact.name} at ${contact.contact}`);
+): Promise<string> {
+  console.log(`[Activity] Sending records request email to ${contact.name} at ${contact.contact}`);
 
-  // MOCKED: Skip actual email for now
-  console.log(`[MOCK] Would email ${contact.contact} with request ID: ${requestId}`);
+  // Get patient case information to construct reply-to email
+  const { data: patientCase, error: caseError } = await supabase
+    .from('patient_cases')
+    .select('first_name, last_name, email')
+    .eq('id', patientCaseId)
+    .single();
+
+  if (caseError) throw caseError;
+
+  // Construct reply-to email: records+{firstname}.{lastname}@havencresthealth.com
+  const firstName = (patientCase.first_name || '').toLowerCase().replace(/\s+/g, '');
+  const lastName = (patientCase.last_name || '').toLowerCase().replace(/\s+/g, '');
+  const replyToEmail = `records+${firstName}.${lastName}@havencresthealth.com`;
+
+  console.log(`[Activity] Reply-to email: ${replyToEmail}`);
+
+  // Download signed authorization document
+  console.log(`[Activity] Downloading signed authorization document ${requestId}`);
+  const pdfBuffer = await openSignService.downloadSignedDocument(requestId);
+
+  if (!pdfBuffer) {
+    throw new Error(`Failed to download signed document ${requestId}`);
+  }
+
+  console.log(`[Activity] Downloaded authorization document, size: ${pdfBuffer.length} bytes`);
+
+  // Construct email body
+  const htmlBody = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <h2 style="color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px;">Medical Records Request</h2>
+
+      <p>Dear ${contact.name},</p>
+
+      <p>We are writing on behalf of our patient, <strong>${patientCase.first_name} ${patientCase.last_name}</strong>, to request a copy of their medical records.</p>
+
+      <p>Attached to this email is a signed patient authorization form permitting the release of these records.</p>
+
+      <h3 style="color: #333; margin-top: 20px;">How to Send Records:</h3>
+      <p>Please send the medical records to: <strong>${replyToEmail}</strong></p>
+
+      <p>Alternatively, you can reply directly to this email with the records attached.</p>
+
+      <p>If you have any questions or need additional information, please don't hesitate to contact us by replying to this email.</p>
+
+      <p>Thank you for your assistance.</p>
+
+      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+
+      <p style="color: #666; font-size: 12px;">
+        Sincerely,<br>
+        Havencrest Health<br>
+        <a href="mailto:${replyToEmail}">${replyToEmail}</a>
+      </p>
+    </div>
+  `;
+
+  const textBody = `
+Medical Records Request
+
+Dear ${contact.name},
+
+We are writing on behalf of our patient, ${patientCase.first_name} ${patientCase.last_name}, to request a copy of their medical records.
+
+Attached to this email is a signed patient authorization form permitting the release of these records.
+
+HOW TO SEND RECORDS:
+Please send the medical records to: ${replyToEmail}
+
+Alternatively, you can reply directly to this email with the records attached.
+
+If you have any questions or need additional information, please don't hesitate to contact us.
+
+Thank you for your assistance.
+
+Sincerely,
+Havencrest Health
+${replyToEmail}
+  `.trim();
+
+  // Send email via Mailgun
+  const result = await mailgunService.sendEmail({
+    to: contact.contact,
+    subject: `Medical Records Request - ${patientCase.first_name} ${patientCase.last_name}`,
+    html: htmlBody,
+    text: textBody,
+    replyTo: replyToEmail,
+    tags: ['medical-records', 'records-request'],
+    metadata: {
+      patientCaseId,
+      requestId,
+      providerName: contact.name,
+      replyToEmail
+    },
+    attachments: [{
+      filename: `authorization-${patientCase.first_name}-${patientCase.last_name}.pdf`,
+      data: pdfBuffer,
+      contentType: 'application/pdf'
+    }]
+  });
+
+  if (!result.success) {
+    throw new Error(`Failed to send email: ${result.error}`);
+  }
+
+  console.log(`[Activity] Email sent successfully! Message ID: ${result.messageId}`);
+
+  // Log to communication logs
+  await logCommunication(
+    patientCaseId,
+    'email',
+    'outbound',
+    'sent',
+    `Email sent to ${contact.name} with medical records authorization`,
+    {
+      message_id: result.messageId,
+      email_address: contact.contact,
+      provider_name: contact.name,
+      authorization_document_id: requestId,
+      reply_to_email: replyToEmail
+    }
+  );
+
+  return result.messageId!;
 }
 
 export async function waitForRecords(providerName: string): Promise<void> {

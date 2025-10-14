@@ -53,7 +53,7 @@ export async function testFaxWorkflow(
     contact: params.faxNumber,
   };
 
-  await a.sendFax(mockContact, `test-fax-${Date.now()}`);
+  await a.sendFax(patientCaseId, mockContact, `test-fax-${Date.now()}`);
 
   log.info('Test fax workflow completed', { patientCaseId });
   return { success: true };
@@ -75,7 +75,7 @@ export async function testEmailWorkflow(
     contact: params.to,
   };
 
-  await a.sendEmail(mockContact, `test-email-${Date.now()}`);
+  await a.sendRecordsEmail(patientCaseId, mockContact, `test-email-${Date.now()}`);
 
   log.info('Test email workflow completed', { patientCaseId });
   return { success: true };

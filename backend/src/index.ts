@@ -1112,17 +1112,24 @@ app.post('/api/verifications/:id/approve', async (req, res) => {
       .eq('id', id)
       .single();
 
+    console.log(`[VERIFICATION APPROVE] Verification ${id} - workflow_execution_id: ${fullVerification?.workflow_execution_id}`);
+
     if (fullVerification?.workflow_execution_id) {
       const { data: workflowExec } = await supabase
         .from('workflow_executions')
-        .select('workflow_id')
+        .select('workflow_id, status')
         .eq('id', fullVerification.workflow_execution_id)
         .single();
+
+      console.log(`[VERIFICATION APPROVE] Workflow execution: ${JSON.stringify(workflowExec)}`);
 
       if (workflowExec?.workflow_id) {
         try {
           const client = await getTemporalClient();
           const handle = client.workflow.getHandle(workflowExec.workflow_id);
+
+          console.log(`[VERIFICATION APPROVE] Sending signal with data:`, { faxNumber, email, otherContactInfo });
+
           await handle.signal('verificationComplete', true, {
             faxNumber,
             email,
@@ -1131,9 +1138,14 @@ app.post('/api/verifications/:id/approve', async (req, res) => {
           console.log(`✅ Sent verificationComplete signal to workflow ${workflowExec.workflow_id}`);
         } catch (error: any) {
           console.error(`❌ Failed to send signal to workflow: ${error.message}`);
+          console.error(`   Full error:`, error);
           // Don't fail the request - verification is still saved
         }
+      } else {
+        console.warn(`⚠️ No workflow_id found for workflow_execution_id: ${fullVerification.workflow_execution_id}`);
       }
+    } else {
+      console.warn(`⚠️ No workflow_execution_id found for verification: ${id}`);
     }
 
     res.json({ success: true });
@@ -1196,6 +1208,165 @@ app.post('/api/verifications/:id/reject', async (req, res) => {
 // ============================================
 // Webhook Routes
 // ============================================
+
+// HumbleFax webhook
+app.post('/api/webhooks/humblefax', async (req, res) => {
+  try {
+    const webhookData = req.body;
+
+    console.log('📠 [HUMBLEFAX WEBHOOK] Received fax status notification:', JSON.stringify(webhookData, null, 2));
+
+    const { type, data } = webhookData;
+
+    // Log webhook event to database
+    const webhookEventId = uuidv4();
+    await supabase.from('webhook_events').insert({
+      id: webhookEventId,
+      event_type: `humblefax:${type}`,
+      payload: webhookData,
+      processed: false,
+    });
+    console.log(`✅ Logged webhook event ${webhookEventId} to database`);
+
+    if (type === 'SentFax.SendComplete' && data?.SentFax) {
+      const fax = data.SentFax;
+      const faxId = fax.id.toString();
+
+      console.log(`📠 [HUMBLEFAX WEBHOOK] Fax ${faxId} completed with status: ${fax.status}`);
+
+      // Find the communication log by fax ID
+      const { data: commLog, error: commError } = await supabase
+        .from('communication_logs')
+        .select('*')
+        .eq('metadata->>fax_id', faxId)
+        .eq('type', 'fax')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (commError || !commLog) {
+        console.info(`⚠️ Could not find communication log for fax ID: ${faxId}`);
+        // Mark webhook as processed
+        await supabase.from('webhook_events').update({
+          processed: true,
+        }).eq('id', webhookEventId);
+        return res.status(200).json({ received: true });
+      }
+
+      console.log(`✅ Found communication log ${commLog.id} for fax ${faxId}`);
+
+      // Update webhook event with related IDs
+      await supabase.from('webhook_events').update({
+        patient_case_id: commLog.patient_case_id,
+        workflow_execution_id: commLog.workflow_execution_id,
+      }).eq('id', webhookEventId);
+
+      // Determine success based on fax status and recipients
+      const isSuccess = fax.status === 'success' && fax.numSuccesses > 0;
+      const successfulRecipients = fax.recipients?.filter((r: any) => r.status === 'success') || [];
+      const failedRecipients = fax.recipients?.filter((r: any) => r.status === 'failure') || [];
+
+      console.log(`📊 [HUMBLEFAX WEBHOOK] Results: ${fax.numSuccesses} successes, ${fax.numFailures} failures`);
+
+      // Prepare result data
+      const resultData = {
+        fax_id: faxId,
+        status: fax.status,
+        pages_sent: fax.numPages,
+        successes: fax.numSuccesses,
+        failures: fax.numFailures,
+        successful_recipients: successfulRecipients.map((r: any) => r.toNumber),
+        failed_recipients: failedRecipients.map((r: any) => ({
+          number: r.toNumber,
+          reason: r.attempts?.calls?.[0]?.failureReason || 'Unknown failure'
+        })),
+        completion_time: new Date().toISOString(),
+        transmission_details: fax.recipients
+      };
+
+      // Update communication log status
+      if (isSuccess) {
+        console.log(`✅ [HUMBLEFAX WEBHOOK] Fax sent successfully to ${fax.numSuccesses} recipient(s)`);
+        await supabase
+          .from('communication_logs')
+          .update({
+            status: 'delivered',
+            metadata: {
+              ...commLog.metadata,
+              ...resultData
+            }
+          })
+          .eq('id', commLog.id);
+      } else {
+        console.log(`❌ [HUMBLEFAX WEBHOOK] Fax failed or partially failed`);
+        await supabase
+          .from('communication_logs')
+          .update({
+            status: 'failed',
+            metadata: {
+              ...commLog.metadata,
+              ...resultData,
+              error_message: `Fax failed: ${fax.numFailures} failures out of ${fax.recipients?.length || 1} recipients`
+            }
+          })
+          .eq('id', commLog.id);
+      }
+
+      console.log(`🎉 [HUMBLEFAX WEBHOOK] Communication log ${commLog.id} updated`);
+
+      // Send signal to workflow
+      if (commLog.workflow_execution_id) {
+        const { data: workflowExec } = await supabase
+          .from('workflow_executions')
+          .select('workflow_id')
+          .eq('id', commLog.workflow_execution_id)
+          .single();
+
+        if (workflowExec?.workflow_id) {
+          try {
+            const client = await getTemporalClient();
+            const handle = client.workflow.getHandle(workflowExec.workflow_id);
+
+            await handle.signal('faxCompleted', {
+              success: isSuccess,
+              faxId: faxId,
+              error: isSuccess ? undefined : `${fax.numFailures} of ${fax.recipients?.length || 1} recipients failed`
+            });
+
+            console.log(`✅ Sent faxCompleted signal to workflow ${workflowExec.workflow_id}`);
+          } catch (error: any) {
+            console.error(`❌ Failed to send signal to workflow: ${error.message}`);
+            // Don't fail the webhook - the status is still updated in the database
+          }
+        }
+      }
+
+      // Mark webhook as successfully processed
+      await supabase.from('webhook_events').update({
+        processed: true,
+      }).eq('id', webhookEventId);
+
+    } else {
+      console.log(`📠 [HUMBLEFAX WEBHOOK] Ignoring webhook type: ${type}`);
+      // Mark webhook as processed (even though we don't handle it)
+      await supabase.from('webhook_events').update({
+        processed: true,
+      }).eq('id', webhookEventId);
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Webhook processed successfully'
+    });
+
+  } catch (error: any) {
+    console.error('❌ [HUMBLEFAX WEBHOOK] Error processing webhook:', error);
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to process HumbleFax webhook'
+    });
+  }
+});
 
 // Twilio SMS webhook
 app.post('/api/webhooks/twilio/sms', async (req, res) => {
