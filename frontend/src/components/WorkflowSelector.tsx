@@ -8,7 +8,7 @@ interface WorkflowSelectorProps {
   onCancel: () => void;
 }
 
-export default function WorkflowSelector({ patientCaseId, onStart, onCancel }: WorkflowSelectorProps) {
+export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStart, onCancel }: WorkflowSelectorProps) {
   const { data: workflows, isLoading } = useQuery({
     queryKey: ['workflow-catalog'],
     queryFn: api.getWorkflowCatalog,

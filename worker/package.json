@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/worker.ts",
-    "start": "node dist/worker.js"
+    "start": "node dist/worker.js",
+    "test:esign": "tsx src/tests/test-esign.ts"
   },
   "dependencies": {
     "@afterimage/shared": "*",

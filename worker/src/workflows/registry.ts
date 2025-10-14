@@ -8,6 +8,8 @@ export const PatientOutreachParamsSchema = z.object({
 });
 
 export const RecordsRetrievalParamsSchema = z.object({
+  providerId: z.string().uuid().optional(), // Provider UUID from database
+  providerName: z.string().optional(), // Fallback if providerId not available (for legacy workflows)
   followUpEnabled: z.boolean().default(false),
   followUpInterval: z.string().default('3 days'),
   maxFollowUps: z.number().min(0).max(5).default(2),

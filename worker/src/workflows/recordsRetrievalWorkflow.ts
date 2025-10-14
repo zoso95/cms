@@ -36,12 +36,45 @@ export async function recordsRetrievalWorkflow(
 
   await checkPaused();
   await a.updateWorkflowStatus(`Creating records request for ${provider}`);
-  const requestId = await a.createRecordsRequest(provider);
+  const requestId = await a.createRecordsRequest(patientCaseId, provider);
   log.info('Records request created', { patientCaseId, provider, requestId });
 
+  // Poll for signature completion (OpenSign doesn't have webhooks yet)
   await checkPaused();
   await a.updateWorkflowStatus('Waiting for patient signature');
-  await a.waitForSignature(requestId);
+
+  const maxSignatureAttempts = 240; // Check for up to 30 days (every 3 hours)
+  let signatureAttempts = 0;
+  let signatureDone = false;
+  let signatureSigned = false;
+
+  while (!signatureDone && signatureAttempts < maxSignatureAttempts) {
+    log.info('Checking signature status', { patientCaseId, provider, requestId, attempt: signatureAttempts + 1 });
+
+    const signatureStatus = await a.waitForSignature(requestId, patientCaseId);
+    signatureDone = signatureStatus.done;
+    signatureSigned = signatureStatus.signed;
+
+    if (!signatureDone) {
+      //await sleep('3 hours'); // Check every 3 hours
+      // TODO fix me!
+      await sleep('1 minute'); // Check every 3 hours
+      signatureAttempts++;
+    }
+  }
+
+  if (!signatureDone) {
+    log.error('Signature timed out', { patientCaseId, provider, requestId, attempts: signatureAttempts });
+    await a.updateWorkflowStatus('Signature request timed out');
+    throw new Error(`Signature request timed out after ${signatureAttempts} attempts`);
+  }
+
+  if (!signatureSigned) {
+    log.error('Signature declined or expired', { patientCaseId, provider, requestId });
+    await a.updateWorkflowStatus('Signature declined or expired');
+    throw new Error('Patient declined or signature expired');
+  }
+
   log.info('Signature received', { patientCaseId, provider, requestId });
 
   await checkPaused();

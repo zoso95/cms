@@ -263,8 +263,8 @@ function WorkflowHierarchy({
 
           {/* Child workflows */}
           {childrenByParent[parent.workflow_id]
-            ?.sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
-            .map((child) => (
+            ?.sort((a: any, b: any) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
+            .map((child: any) => (
               <WorkflowCard
                 key={child.id}
                 workflow={child}
@@ -604,6 +604,29 @@ export default function PatientCaseDetail() {
                     <h3 style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.25rem' }}>
                       {provider.full_name || provider.name}
                     </h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.25rem' }}>
+                      <p style={{ fontSize: '0.75rem', color: '#666', fontFamily: 'monospace' }}>
+                        ID: {provider.id}
+                      </p>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(provider.id);
+                          alert('Provider ID copied to clipboard!');
+                        }}
+                        style={{
+                          padding: '0.125rem 0.5rem',
+                          fontSize: '0.625rem',
+                          backgroundColor: '#f3f4f6',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: '500'
+                        }}
+                        title="Copy provider ID"
+                      >
+                        Copy ID
+                      </button>
+                    </div>
                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                       {provider.provider_type && (
                         <span style={{

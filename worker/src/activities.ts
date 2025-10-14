@@ -9,6 +9,8 @@ import { normalizePhoneNumber } from './utils/phone';
 import { buildDynamicVariables } from './utils/dynamicVariables';
 import { registerWorkflow, type RegisterWorkflowParams } from './utils/workflowRegistry';
 import { claude } from './services/claude';
+import { openSignService } from './services/opensign';
+import { mailgunService } from './services/mailgun';
 
 // Lazy-initialize Twilio client
 let twilioClient: ReturnType<typeof twilio> | null = null;
@@ -579,26 +581,282 @@ export async function extractProviders(
 }
 
 // ============================================
-// Records Request Activities
+// E-Signature Activities (OpenSign)
 // ============================================
-export async function createRecordsRequest(providerName: string): Promise<string> {
-  console.log(`[Activity] Creating records request for provider: ${providerName}`);
 
-  // This would typically get leadId from context, for now we'll need to pass it
-  // In a real implementation, we'd store the leadId in the activity context
-  const requestId = uuidv4();
+/**
+ * Create a signature request via OpenSign
+ * @param patientCaseId - Patient case ID
+ * @param signerEmail - Email of the person who needs to sign
+ * @param signerName - Name of the person who needs to sign
+ * @param documentTitle - Title/description of the document
+ * @param templateId - Optional OpenSign template ID (uses first available if not specified)
+ * @returns Document ID for tracking
+ */
+export async function createSignatureRequest(
+  patientCaseId: number,
+  signerEmail: string,
+  signerName: string,
+  documentTitle: string,
+  templateId?: string
+): Promise<string> {
+  console.log(`[Activity] Creating signature request for ${signerName} (${signerEmail})`);
+  console.log(`[Activity]   Document: ${documentTitle}`);
 
-  // For now, return the request ID
-  // In a real implementation, this would create a signature request via DocuSign/HelloSign
-  return requestId;
+  const result = await openSignService.createSignatureRequest({
+    signerEmail,
+    signerName,
+    documentTitle,
+    templateId,
+    metadata: {
+      patientCaseId,
+      createdBy: 'workflow'
+    }
+  });
+
+  if (!result.success) {
+    throw new Error(`Failed to create signature request: ${result.error}`);
+  }
+
+  console.log(`[Activity] Signature request created! Document ID: ${result.requestId}`);
+  console.log(`[Activity]   Signing URL: ${result.signingUrl}`);
+
+  // Log to communication logs
+  await logCommunication(
+    patientCaseId,
+    'email',
+    'outbound',
+    'sent',
+    `Signature request sent: ${documentTitle}`,
+    {
+      document_id: result.requestId,
+      signing_url: result.signingUrl,
+      signer_email: signerEmail,
+      signer_name: signerName
+    }
+  );
+
+  return result.requestId!;
 }
 
-export async function waitForSignature(requestId: string): Promise<void> {
-  console.log(`[Activity] Waiting for signature on request ${requestId}`);
+/**
+ * Check signature status (single poll)
+ * @param documentId - OpenSign document ID
+ * @returns Status information
+ */
+export async function checkSignatureStatus(documentId: string): Promise<{
+  status: 'pending' | 'signed' | 'declined' | 'expired';
+  signedAt?: string;
+  signedDocumentUrl?: string;
+}> {
+  console.log(`[Activity] Checking signature status for document ${documentId}`);
 
-  // This would be triggered by a webhook in production
-  // For now, we'll simulate a delay
-  await new Promise(resolve => setTimeout(resolve, 100));
+  const status = await openSignService.getSignatureStatus(documentId);
+
+  if (!status) {
+    throw new Error(`Failed to get signature status for document ${documentId}`);
+  }
+
+  console.log(`[Activity] Document ${documentId} status: ${status.status}`);
+
+  return {
+    status: status.status,
+    signedAt: status.signedAt,
+    signedDocumentUrl: status.signedDocumentUrl
+  };
+}
+
+/**
+ * Check signature status and log completion/failure
+ * This is meant to be called in a polling loop from the workflow
+ * @param documentId - OpenSign document ID
+ * @param patientCaseId - Patient case ID for logging
+ * @returns Object with done flag and signed flag
+ */
+export async function waitForSignature(
+  documentId: string,
+  patientCaseId: number
+): Promise<{ done: boolean; signed: boolean }> {
+  console.log(`[Activity] Checking signature status for document ${documentId}`);
+
+  const status = await openSignService.getSignatureStatus(documentId);
+
+  if (!status) {
+    throw new Error(`Failed to get signature status for document ${documentId}`);
+  }
+
+  if (status.status === 'signed') {
+    console.log(`[Activity] ✅ Document ${documentId} has been signed!`);
+
+    // Log completion
+    await logCommunication(
+      patientCaseId,
+      'email',
+      'inbound',
+      'received',
+      `Document signed`,
+      {
+        document_id: documentId,
+        signed_at: status.signedAt,
+        signed_document_url: status.signedDocumentUrl
+      }
+    );
+
+    return { done: true, signed: true };
+  }
+
+  if (status.status === 'declined') {
+    console.log(`[Activity] ❌ Document ${documentId} was declined`);
+
+    // Log decline
+    await logCommunication(
+      patientCaseId,
+      'email',
+      'inbound',
+      'failed',
+      `Document declined`,
+      {
+        document_id: documentId
+      }
+    );
+
+    return { done: true, signed: false };
+  }
+
+  if (status.status === 'expired') {
+    console.log(`[Activity] ⏱️ Document ${documentId} has expired`);
+
+    // Log expiration
+    await logCommunication(
+      patientCaseId,
+      'email',
+      'outbound',
+      'failed',
+      `Document expired`,
+      {
+        document_id: documentId
+      }
+    );
+
+    return { done: true, signed: false };
+  }
+
+  // Still pending - workflow will continue polling
+  console.log(`[Activity] ⏳ Document ${documentId} is still pending`);
+  return { done: false, signed: false };
+}
+
+/**
+ * Download signed document PDF
+ * @param documentId - OpenSign document ID
+ * @returns PDF buffer
+ */
+export async function downloadSignedDocument(documentId: string): Promise<Buffer> {
+  console.log(`[Activity] Downloading signed document ${documentId}`);
+
+  const pdfBuffer = await openSignService.downloadSignedDocument(documentId);
+
+  if (!pdfBuffer) {
+    throw new Error(`Failed to download signed document ${documentId}`);
+  }
+
+  console.log(`[Activity] Downloaded signed document ${documentId}, size: ${pdfBuffer.length} bytes`);
+
+  return pdfBuffer;
+}
+
+// ============================================
+// Records Request Activities
+// ============================================
+
+/**
+ * Create a medical records release authorization request
+ * This creates a signature request for the patient to sign their medical records release form
+ * @param patientCaseId - Patient case ID
+ * @param providerName - Name of the provider whose records are being requested
+ * @returns Document ID for tracking
+ */
+export async function createRecordsRequest(
+  patientCaseId: number,
+  providerName: string
+): Promise<string> {
+  console.log(`[Activity] Creating records request for ${providerName}`);
+
+  // Get patient information from database
+  const { data: patientCase, error: caseError } = await supabase
+    .from('patient_cases')
+    .select('email, first_name, last_name')
+    .eq('id', patientCaseId)
+    .single();
+
+  if (caseError) throw caseError;
+  if (!patientCase.email) throw new Error('No email address for patient case');
+
+  const patientName = `${patientCase.first_name || ''} ${patientCase.last_name || ''}`.trim() || 'Patient';
+  const signerEmail = patientCase.email;
+
+  // Try to get provider details from database (organization, full name, etc.)
+  let providerOrganization: string | undefined;
+  const { data: provider } = await supabase
+    .from('providers')
+    .select('organization, full_name, first_name, last_name')
+    .eq('patient_case_id', patientCaseId)
+    .or(`name.eq.${providerName},full_name.eq.${providerName}`)
+    .maybeSingle();
+
+  if (provider) {
+    providerOrganization = provider.organization || undefined;
+    // Use full_name if available, otherwise use what was passed
+    const fullProviderName = provider.full_name ||
+                             `${provider.first_name || ''} ${provider.last_name || ''}`.trim();
+    if (fullProviderName) {
+      providerName = fullProviderName;
+    }
+    console.log(`[Activity] Found provider details: ${providerName}${providerOrganization ? ` at ${providerOrganization}` : ''}`);
+  }
+
+  // Create signature request via OpenSign
+  const documentTitle = `Medical Records Release Authorization - ${providerName}`;
+
+  const result = await openSignService.createSignatureRequest({
+    signerEmail,
+    signerName: patientName,
+    documentTitle,
+    providerName,
+    providerOrganization,
+    metadata: {
+      patientCaseId,
+      providerName,
+      providerOrganization,
+      createdBy: 'records-retrieval-workflow'
+    }
+  });
+
+  if (!result.success) {
+    throw new Error(`Failed to create records request: ${result.error}`);
+  }
+
+  console.log(`[Activity] Records request created! Document ID: ${result.requestId}`);
+  console.log(`[Activity]   Provider: ${providerName}`);
+  console.log(`[Activity]   Patient: ${patientName} (${signerEmail})`);
+
+  // Log to communication logs
+  await logCommunication(
+    patientCaseId,
+    'email',
+    'outbound',
+    'sent',
+    `Records release authorization sent for ${providerName}`,
+    {
+      document_id: result.requestId,
+      signing_url: result.signingUrl,
+      provider_name: providerName,
+      signer_email: signerEmail,
+      signer_name: patientName
+    }
+  );
+
+  return result.requestId!;
 }
 
 export async function findDoctorOffice(providerName: string): Promise<{

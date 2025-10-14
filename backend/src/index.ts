@@ -478,6 +478,18 @@ app.get('/api/workflows/catalog', async (req, res) => {
         },
       },
       {
+        name: 'recordsRetrievalWorkflow',
+        displayName: 'Records Retrieval',
+        description: 'Request and retrieve medical records from a healthcare provider',
+        category: 'production',
+        defaultParams: {
+          providerId: '',
+          followUpEnabled: false,
+          followUpInterval: '3 days',
+          maxFollowUps: 2,
+        },
+      },
+      {
         name: 'testSMSWorkflow',
         displayName: 'Test SMS',
         description: 'Send a test SMS to a patient',
@@ -603,6 +615,27 @@ app.post('/api/workflows/start', async (req, res) => {
     let args: any[] = [patientCaseId];
     if (workflowName === 'endToEndWorkflow') {
       args = [patientCaseId, parameters];
+    } else if (workflowName === 'recordsRetrievalWorkflow') {
+      // Records retrieval needs provider name as second argument
+      // Look up provider from providerId if provided
+      let providerName = parameters.providerName || 'Unknown Provider';
+
+      if (parameters.providerId) {
+        const { data: provider } = await supabase
+          .from('providers')
+          .select('full_name, first_name, last_name, name')
+          .eq('id', parameters.providerId)
+          .maybeSingle();
+
+        if (provider) {
+          providerName = provider.full_name ||
+                        `${provider.first_name || ''} ${provider.last_name || ''}`.trim() ||
+                        provider.name ||
+                        providerName;
+        }
+      }
+
+      args = [patientCaseId, providerName, parameters];
     } else if (workflowName.startsWith('test')) {
       args = [patientCaseId, parameters];
     } else {
