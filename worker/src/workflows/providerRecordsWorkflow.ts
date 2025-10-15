@@ -53,7 +53,14 @@ export async function providerRecordsWorkflow(
   await checkPaused();
   await a.updateWorkflowStatus(`Waiting for patient signature - ${providerName}`);
 
-  const maxSignatureAttempts = 240; // Check for up to 30 days (every 3 hours)
+  // TODO: Switch to webhook/signal-based polling instead of sleep-based polling
+  // Current approach: Check frequently for first 30 min (for demo), then slow down
+  // Better approach: Use OpenSign webhook or Temporal signals to notify when signed
+
+  const fastPollingAttempts = 10; // 10 attempts × 3 min = 30 minutes
+  const slowPollingAttempts = 60; // 60 attempts × 12 hours = 30 days
+  const maxSignatureAttempts = fastPollingAttempts + slowPollingAttempts;
+
   let signatureAttempts = 0;
   let signatureDone = false;
   let signatureSigned = false;
@@ -66,7 +73,12 @@ export async function providerRecordsWorkflow(
     signatureSigned = signatureStatus.signed;
 
     if (!signatureDone) {
-      await sleep('3 minutes'); // TODO: Change to '3 hours' for production
+      // Fast polling for first 30 minutes (for demo), then slow polling
+      if (signatureAttempts < fastPollingAttempts) {
+        await sleep('3 minutes'); // Fast: check every 3 minutes for first 30 min
+      } else {
+        await sleep('12 hours'); // Slow: check every 12 hours after 30 min
+      }
       signatureAttempts++;
     }
   }

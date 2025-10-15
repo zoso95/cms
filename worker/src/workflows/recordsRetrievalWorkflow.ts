@@ -72,7 +72,7 @@ export async function recordsRetrievalWorkflow(
 
     if (!signatureDone) {
       //await sleep('3 hours'); // Check every 3 hours
-      // TODO fix me!
+      // (maybe?) TODO fix me!
       await sleep('3 minute'); // Check every 3 hours
       signatureAttempts++;
     }

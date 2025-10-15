@@ -46,9 +46,8 @@ export interface IntakeCallResult {
 
 // Hardcoded configuration for demo (exactly 1 week)
 const MAX_ATTEMPTS = 7;
-//const WAIT_BETWEEN_ATTEMPTS = '1 day';
-// TODO fix me.
-const WAIT_BETWEEN_ATTEMPTS = '5 minutes';
+const WAIT_BETWEEN_ATTEMPTS = '1 day';
+// const WAIT_BETWEEN_ATTEMPTS = '5 minutes';
 const SMS_MESSAGES = [
   "Hi! This is Check My Charts. We wanted to give you a follow up about your case that you left on our website. We'll give you a call in a few minutes.",
   "Hi again! We'd love discuss your case with you. We'll call in a few minutes.",
@@ -116,11 +115,9 @@ export async function intakeCallWorkflow(
     // Check pause state before waiting
     await checkPaused();
 
-    // TODO fix this before shipping!
-
     // Wait 1 minute before calling to give patient time to see the SMS
-    await a.updateWorkflowStatus(`Day ${dayNumber}: Waiting 1 minute before call`);
-    await sleep('1 minute');
+    await a.updateWorkflowStatus(`Day ${dayNumber}: Waiting 5 minute before call`);
+    await sleep('5 minutes');
 
     // Check pause state before making call
     await checkPaused();
