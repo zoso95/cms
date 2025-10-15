@@ -227,3 +227,25 @@ export async function getPatientVerifications(req: Request, res: Response) {
     res.status(500).json({ error: error.message });
   }
 }
+
+/**
+ * Update patient case details
+ */
+export async function updatePatientDetails(req: Request, res: Response) {
+  try {
+    const { details } = req.body;
+
+    const { data, error } = await supabase
+      .from('patient_cases')
+      .update({ details })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}

@@ -28,6 +28,11 @@ export const api = {
   },
   getPatientCasesWithWorkflows: () => apiRequest<any[]>('/patient-cases-with-workflows'),
   getPatientCase: (id: string) => apiRequest<any>(`/patient-cases/${id}`),
+  updatePatientDetails: (id: string, details: string) =>
+    apiRequest<any>(`/patient-cases/${id}/details`, {
+      method: 'PATCH',
+      body: JSON.stringify({ details }),
+    }),
 
   // Workflows
   getWorkflowCatalog: () => apiRequest<any[]>('/workflows/catalog'),

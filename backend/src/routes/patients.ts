@@ -7,6 +7,7 @@ const router = Router();
 router.get('/', patientController.getAllPatientCases);
 // Note: /patient-cases-with-workflows is registered in routes/index.ts (top level)
 router.get('/:id', patientController.getPatientCase);
+router.patch('/:id/details', patientController.updatePatientDetails);
 
 // Patient-related data
 router.get('/:id/workflows', patientController.getPatientWorkflows);
