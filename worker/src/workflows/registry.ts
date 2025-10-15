@@ -141,6 +141,14 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     parameters: z.object({}),
     defaultParams: {},
   },
+  intakeCallWorkflow: {
+    name: 'intakeCallWorkflow',
+    displayName: 'Intake Call (Production)',
+    description: 'Hardcoded 1-week patient outreach workflow. Handles intake call, case evaluation with Claude AI, provider extraction, and triggers provider verification. Updates Tasks 1, 2, 3, and 5.',
+    category: 'production',
+    parameters: z.object({}),
+    defaultParams: {},
+  },
 };
 
 // Helper to get workflow metadata
