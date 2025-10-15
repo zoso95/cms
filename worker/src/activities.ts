@@ -588,6 +588,52 @@ export async function extractProviders(
   return savedProviders;
 }
 
+/**
+ * Get all verified providers for a patient case
+ * @param patientCaseId - Patient case ID
+ * @returns Array of verified providers
+ */
+export async function getVerifiedProviders(patientCaseId: number): Promise<any[]> {
+  console.log(`[Activity] Getting verified providers for patient case ${patientCaseId}`);
+
+  const { data, error } = await supabase
+    .from('providers')
+    .select('*')
+    .eq('patient_case_id', patientCaseId)
+    .eq('verified', true)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error(`[Activity] Error fetching verified providers:`, error);
+    throw error;
+  }
+
+  console.log(`[Activity] Found ${data?.length || 0} verified providers`);
+  return data || [];
+}
+
+/**
+ * Get a single provider by ID
+ * @param providerId - Provider ID
+ * @returns Provider object or null if not found
+ */
+export async function getVerifiedProvider(providerId: string): Promise<any | null> {
+  console.log(`[Activity] Getting provider ${providerId}`);
+
+  const { data, error } = await supabase
+    .from('providers')
+    .select('*')
+    .eq('id', providerId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`[Activity] Error fetching provider:`, error);
+    throw error;
+  }
+
+  return data;
+}
+
 // ============================================
 // E-Signature Activities (OpenSign)
 // ============================================
@@ -1100,7 +1146,7 @@ export async function sendRecordsEmail(
 
       <p>Dear ${contact.name},</p>
 
-      <p>We are writing on behalf of our patient, <strong>${patientCase.first_name} ${patientCase.last_name}</strong>, to request a copy of their medical records.</p>
+      <p>We are writing on behalf of our client, <strong>${patientCase.first_name} ${patientCase.last_name}</strong>, to request a copy of their medical records.</p>
 
       <p>Attached to this email is a signed patient authorization form permitting the release of these records.</p>
 
@@ -1128,7 +1174,7 @@ Medical Records Request
 
 Dear ${contact.name},
 
-We are writing on behalf of our patient, ${patientCase.first_name} ${patientCase.last_name}, to request a copy of their medical records.
+We are writing on behalf of our client, ${patientCase.first_name} ${patientCase.last_name}, to request a copy of their medical records.
 
 Attached to this email is a signed patient authorization form permitting the release of these records.
 

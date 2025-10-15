@@ -149,6 +149,25 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     parameters: z.object({}),
     defaultParams: {},
   },
+  recordsCoordinatorWorkflow: {
+    name: 'recordsCoordinatorWorkflow',
+    displayName: 'Records Coordinator (Production)',
+    description: 'Coordinates records retrieval for all verified providers. Launches child workflows per provider, manages e-signature collection, and sends requests to providers. Updates Tasks 6, 7, and 8.',
+    category: 'production',
+    parameters: z.object({}),
+    defaultParams: {},
+  },
+  providerRecordsWorkflow: {
+    name: 'providerRecordsWorkflow',
+    displayName: 'Provider Records (Child)',
+    description: 'Child workflow for retrieving records from a single provider. Creates release authorization, waits for signature, and sends to provider.',
+    category: 'test',
+    parameters: z.object({
+      providerId: z.string().uuid(),
+      providerName: z.string(),
+    }),
+    defaultParams: { providerId: '', providerName: '' },
+  },
 };
 
 // Helper to get workflow metadata
