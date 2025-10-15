@@ -47,7 +47,15 @@ export async function requireTemporalUIAuth(req: Request, res: Response, next: N
     (req.session as any).userId = user.id;
     (req.session as any).userEmail = user.email;
 
-    next();
+    // Explicitly save session before continuing
+    req.session.save((err) => {
+      if (err) {
+        console.error('[Temporal UI Auth] Error saving session:', err);
+        return res.status(500).json({ error: 'Failed to save session' });
+      }
+      console.log('[Temporal UI Auth] ✓ Session saved');
+      next();
+    });
   } catch (error) {
     console.error('Temporal UI auth error:', error);
     return res.status(500).json({ error: 'Internal server error' });

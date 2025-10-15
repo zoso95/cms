@@ -73,6 +73,8 @@ services:
     volumes:
       - ./backend/.env.production:/app/backend/.env:ro
     environment:
+      # Set NODE_ENV for production mode (secure cookies, etc.)
+      - NODE_ENV=production
       # Override .env for Docker networking
       - TEMPORAL_UI_URL=http://temporal-ui:8080
     ports:

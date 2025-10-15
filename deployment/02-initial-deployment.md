@@ -139,6 +139,7 @@ VITE_TEMPORAL_UI_URL=https://your-domain.com:8233
 ```bash
 # From your local project root
 scp -i /path/to/your-key.pem deployment/ec2-initial-setup.sh ubuntu@your-domain.com:~/
+scp -i ../gnb-prompt.pem deployment/ec2-initial-setup.sh ubuntu@cms.quickchron.com:~/
 ```
 
 ## Step 4: Run EC2 Setup Script
@@ -148,6 +149,7 @@ SSH into your EC2 instance and run the setup script:
 ```bash
 # SSH to EC2
 ssh -i /path/to/your-key.pem ubuntu@your-domain.com
+ssh -i ../gnb-prompt.pem ubuntu@cms.quickchron.com
 
 # Run setup script
 bash ec2-initial-setup.sh your-domain.com your-email@example.com
@@ -169,6 +171,9 @@ After completion, **log out and back in** for Docker group membership to take ef
 ```bash
 exit
 ssh -i /path/to/your-key.pem ubuntu@your-domain.com
+
+exit
+ssh -i ../gnb-prompt.pem ubuntu@cms.quickchron.com
 ```
 
 ## Step 5: Build Frontend Locally
@@ -196,6 +201,15 @@ rsync -avz --exclude 'node_modules' \
   --exclude '.temporal' \
   --exclude '*.log' \
   ./ ubuntu@your-domain.com:~/cms/
+
+sudo chown -R ubuntu:ubuntu ~/cms/
+
+rsync -avz -e "ssh -i ../gnb-prompt.pem" \
+    --exclude 'node_modules' \
+    --exclude '.git' \
+    --exclude '.temporal' \
+    --exclude '*.log' \
+    ./ ubuntu@cms.quickchron.com:~/cms/
 ```
 
 This uploads:

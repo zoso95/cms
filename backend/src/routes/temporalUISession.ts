@@ -32,9 +32,16 @@ router.post('/init', async (req: Request, res: Response) => {
     (req.session as any).userId = user.id;
     (req.session as any).userEmail = user.email;
 
-    console.log('[Temporal UI Session] ✓ Session initialized for user:', user.email);
+    // Explicitly save session before responding
+    req.session.save((err) => {
+      if (err) {
+        console.error('[Temporal UI Session] Error saving session:', err);
+        return res.status(500).json({ error: 'Failed to save session' });
+      }
 
-    res.json({ success: true });
+      console.log('[Temporal UI Session] ✓ Session initialized for user:', user.email);
+      res.json({ success: true });
+    });
   } catch (error) {
     console.error('[Temporal UI Session] Error:', error);
     return res.status(500).json({ error: 'Internal server error' });

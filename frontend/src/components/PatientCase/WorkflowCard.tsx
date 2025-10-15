@@ -94,8 +94,6 @@ export default function WorkflowCard({
           )}
           <a
             href={`${import.meta.env.VITE_TEMPORAL_UI_URL || 'http://localhost:3001/api/temporal-ui'}/namespaces/default/workflows/${workflow.workflow_id}/${workflow.run_id}`}
-            target="_blank"
-            rel="noopener noreferrer"
             onMouseEnter={() => {
               // Pre-initialize session when user hovers over link
               initTemporalUISession();

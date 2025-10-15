@@ -16,6 +16,11 @@ import { requireTemporalUIAuth } from './middleware/temporalUIAuth';
 config();
 
 const app = express();
+
+// Trust proxy - needed for secure cookies to work behind nginx
+// This tells Express to trust the X-Forwarded-Proto header from nginx
+app.set('trust proxy', 1);
+
 const httpServer = createServer(app);
 const io = new SocketIOServer(httpServer, {
   cors: {
@@ -45,7 +50,8 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production', // HTTPS only in production
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'lax',
+    sameSite: 'lax', // Same-site cookie (frontend and API are on same domain)
+    path: '/', // Ensure cookie is sent for all paths
   },
 }));
 
