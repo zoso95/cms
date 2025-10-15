@@ -55,8 +55,11 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=*
+      - TEMPORAL_UI_PUBLIC_PATH=/api/temporal-ui
+    # Port 8080 accessible via backend proxy at /api/temporal-ui
+    # Also exposed on localhost:8233 for direct access during development
     ports:
-      - "8233:8080"
+      - "127.0.0.1:8233:8080"
     networks:
       - cms-network-local
 
@@ -75,6 +78,7 @@ services:
     environment:
       # Override .env values for Docker networking
       - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_UI_URL=http://temporal-ui:8080
     ports:
       - "3001:3001"
     networks:

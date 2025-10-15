@@ -48,6 +48,8 @@ An Elastic IP ensures your instance keeps the same IP address even after reboots
 
 ```bash
 ssh -i /path/to/your-key.pem ubuntu@YOUR_ELASTIC_IP
+
+ssh -i ../gnb-prompt.pem ubuntu@3.145.234.84
 ```
 
 If this works, you're ready to configure DNS!

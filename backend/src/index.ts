@@ -1,13 +1,17 @@
 import express from 'express';
 import cors from 'cors';
+import session from 'express-session';
+import cookieParser from 'cookie-parser';
 import { config } from 'dotenv';
 import { supabase } from './db';
 import { getTemporalClient } from './temporal';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import routes from './routes';
 import * as webhookController from './controllers/webhookController';
 import { validateElevenLabsSignature } from './middleware/webhookSignature';
+import { requireTemporalUIAuth } from './middleware/temporalUIAuth';
 
 config();
 
@@ -17,12 +21,33 @@ const io = new SocketIOServer(httpServer, {
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     methods: ['GET', 'POST'],
+    credentials: true,
   },
 });
 
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// CORS with credentials support for session cookies
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true,
+}));
+
+// Cookie parser (must come before session)
+app.use(cookieParser());
+
+// Session support for Temporal UI authentication
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'temporal-ui-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: 'lax',
+  },
+}));
 
 // ElevenLabs webhook route MUST come before express.json() to preserve raw body
 app.post(
@@ -34,6 +59,21 @@ app.post(
 
 // Apply JSON parsing to all other routes
 app.use(express.json());
+
+// Temporal UI assets (_app directory) - SESSION AUTH
+// These are static assets loaded by the Temporal UI SvelteKit app
+// Must be at root level (not under /api) for proper asset loading
+app.use('/_app', requireTemporalUIAuth, createProxyMiddleware({
+  target: process.env.TEMPORAL_UI_URL || 'http://localhost:8233',
+  changeOrigin: true,
+  onError: (err, req, res) => {
+    console.error('[Temporal UI Assets] Proxy error:', err);
+    (res as any).status(502).json({ error: 'Failed to load Temporal UI assets' });
+  },
+  onProxyReq: (proxyReq, req, res) => {
+    console.log(`[Temporal UI Assets] Proxying: ${req.method} ${req.path}`);
+  },
+}));
 
 // Socket.io connection handling
 io.on('connection', (socket) => {

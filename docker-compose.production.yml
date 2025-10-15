@@ -33,8 +33,8 @@ services:
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=temporal-postgres
-    ports:
-      - "7233:7233"
+    # Port 7233 is NOT exposed to host for security
+    # Backend and worker connect via Docker network using temporal:7233
     networks:
       - cms-network
     healthcheck:
@@ -54,8 +54,9 @@ services:
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=*
-    ports:
-      - "8233:8080"
+      - TEMPORAL_UI_PUBLIC_PATH=/api/temporal-ui
+    # Port 8080 is NOT exposed to host for security
+    # Accessed via authenticated backend proxy at /api/temporal-ui
     networks:
       - cms-network
     restart: unless-stopped
@@ -71,6 +72,9 @@ services:
         condition: service_healthy
     volumes:
       - ./backend/.env.production:/app/backend/.env:ro
+    environment:
+      # Override .env for Docker networking
+      - TEMPORAL_UI_URL=http://temporal-ui:8080
     ports:
       - "3001:3001"
     networks:

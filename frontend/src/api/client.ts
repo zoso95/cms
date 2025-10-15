@@ -18,6 +18,7 @@ export async function apiRequest<T>(endpoint: string, options?: RequestInit): Pr
   }
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    credentials: 'include', // Include cookies for session-based auth (Temporal UI)
     headers,
     ...options,
   });

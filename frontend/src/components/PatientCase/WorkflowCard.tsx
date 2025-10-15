@@ -1,3 +1,5 @@
+import { initTemporalUISession } from '../../utils/temporalUI';
+
 interface WorkflowCardProps {
   workflow: any;
   isChild?: boolean;
@@ -91,15 +93,20 @@ export default function WorkflowCard({
             </div>
           )}
           <a
-            href={`${import.meta.env.VITE_TEMPORAL_UI_URL || 'http://localhost:8233'}/namespaces/default/workflows/${workflow.workflow_id}/${workflow.run_id}`}
+            href={`${import.meta.env.VITE_TEMPORAL_UI_URL || 'http://localhost:3001/api/temporal-ui'}/namespaces/default/workflows/${workflow.workflow_id}/${workflow.run_id}`}
             target="_blank"
             rel="noopener noreferrer"
+            onMouseEnter={() => {
+              // Pre-initialize session when user hovers over link
+              initTemporalUISession();
+            }}
             style={{
               display: 'inline-block',
               marginTop: '0.5rem',
               color: '#2563eb',
               fontSize: '0.875rem',
-              textDecoration: 'none',
+              textDecoration: 'underline',
+              cursor: 'pointer',
             }}
           >
             View in Temporal UI →

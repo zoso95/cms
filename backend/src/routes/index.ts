@@ -3,15 +3,24 @@ import workflowRoutes from './workflows';
 import patientRoutes from './patients';
 import verificationRoutes from './verifications';
 import webhookRoutes from './webhooks';
+import temporalUIRoutes from './temporalUI';
+import temporalUISessionRoutes from './temporalUISession';
 import * as patientController from '../controllers/patientController';
 import { requireAuth } from '../middleware/auth';
+import { requireTemporalUIAuth } from '../middleware/temporalUIAuth';
 
 const router = Router();
 
 // Webhooks - NO AUTH (external services)
 router.use('/webhooks', webhookRoutes);
 
-// All other routes - REQUIRE AUTH
+// Temporal UI session init - JWT AUTH (sets session cookie)
+router.use('/temporal-ui-session', requireAuth, temporalUISessionRoutes);
+
+// Temporal UI - SESSION-BASED AUTH (for AJAX requests)
+router.use('/temporal-ui', requireTemporalUIAuth, temporalUIRoutes);
+
+// All other routes - REQUIRE JWT AUTH
 router.use(requireAuth);
 
 // Special patient cases route (at top level, not nested)
