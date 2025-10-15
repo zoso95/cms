@@ -19,6 +19,12 @@ export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStar
   const [showSource, setShowSource] = useState(false);
   const [enableScheduling, setEnableScheduling] = useState(false);
   const [scheduledAt, setScheduledAt] = useState('');
+  const [showCategory, setShowCategory] = useState<'production' | 'test'>('production');
+
+  // Group workflows by category
+  const productionWorkflows = workflows?.filter((w: any) => w.category === 'production') || [];
+  const testWorkflows = workflows?.filter((w: any) => w.category === 'test') || [];
+  const displayedWorkflows = showCategory === 'production' ? productionWorkflows : testWorkflows;
 
   const { data: sourceData } = useQuery({
     queryKey: ['workflow-source', selectedWorkflow?.name],
@@ -159,37 +165,48 @@ export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStar
 
         {!selectedWorkflow ? (
           <div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', borderBottom: '1px solid #e5e5e5' }}>
               <button
-                onClick={() => setSelectedWorkflow(workflows?.find((w: any) => w.category === 'production'))}
+                onClick={() => setShowCategory('production')}
                 style={{
-                  padding: '0.5rem 1rem',
-                  borderRadius: '6px',
-                  border: '1px solid #e5e5e5',
-                  backgroundColor: '#fff',
+                  padding: '0.75rem 1.5rem',
+                  border: 'none',
+                  backgroundColor: 'transparent',
                   cursor: 'pointer',
                   fontSize: '0.875rem',
+                  fontWeight: '500',
+                  color: showCategory === 'production' ? '#2563eb' : '#666',
+                  borderBottom: showCategory === 'production' ? '2px solid #2563eb' : '2px solid transparent',
+                  marginBottom: '-1px',
                 }}
               >
-                Production
+                Production ({productionWorkflows.length})
               </button>
               <button
-                onClick={() => setSelectedWorkflow(workflows?.find((w: any) => w.category === 'test'))}
+                onClick={() => setShowCategory('test')}
                 style={{
-                  padding: '0.5rem 1rem',
-                  borderRadius: '6px',
-                  border: '1px solid #e5e5e5',
-                  backgroundColor: '#fff',
+                  padding: '0.75rem 1.5rem',
+                  border: 'none',
+                  backgroundColor: 'transparent',
                   cursor: 'pointer',
                   fontSize: '0.875rem',
+                  fontWeight: '500',
+                  color: showCategory === 'test' ? '#2563eb' : '#666',
+                  borderBottom: showCategory === 'test' ? '2px solid #2563eb' : '2px solid transparent',
+                  marginBottom: '-1px',
                 }}
               >
-                Test
+                Test ({testWorkflows.length})
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {workflows?.map((workflow: any) => (
+            {displayedWorkflows.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
+                No {showCategory} workflows available
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {displayedWorkflows.map((workflow: any) => (
                 <div
                   key={workflow.name}
                   onClick={() => setSelectedWorkflow(workflow)}
@@ -225,8 +242,9 @@ export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStar
                     </span>
                   </div>
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <div>

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WORKFLOW_REGISTRY = exports.RecordsWorkflowParamsSchema = exports.CallParamsSchema = exports.RecordsRetrievalParamsSchema = exports.PatientOutreachParamsSchema = void 0;
+exports.WORKFLOW_REGISTRY = exports.EndToEndWorkflowParamsSchema = exports.CallParamsSchema = exports.RecordsRetrievalParamsSchema = exports.PatientOutreachParamsSchema = void 0;
 exports.getWorkflowMetadata = getWorkflowMetadata;
 exports.listWorkflows = listWorkflows;
 exports.validateWorkflowParams = validateWorkflowParams;
@@ -12,6 +12,8 @@ exports.PatientOutreachParamsSchema = zod_1.z.object({
     smsTemplate: zod_1.z.string().default('Please call us back to discuss your medical records.'),
 });
 exports.RecordsRetrievalParamsSchema = zod_1.z.object({
+    providerId: zod_1.z.string().uuid().optional(), // Provider UUID from database
+    providerName: zod_1.z.string().optional(), // Fallback if providerId not available (for legacy workflows)
     followUpEnabled: zod_1.z.boolean().default(false),
     followUpInterval: zod_1.z.string().default('3 days'),
     maxFollowUps: zod_1.z.number().min(0).max(5).default(2),
@@ -20,36 +22,58 @@ exports.CallParamsSchema = zod_1.z.object({
     agentId: zod_1.z.string().optional(),
     maxDuration: zod_1.z.number().default(300), // seconds
 });
-exports.RecordsWorkflowParamsSchema = zod_1.z.object({
+exports.EndToEndWorkflowParamsSchema = zod_1.z.object({
     patientOutreach: exports.PatientOutreachParamsSchema,
     recordsRetrieval: exports.RecordsRetrievalParamsSchema,
     call: exports.CallParamsSchema,
 });
 // Workflow registry
 exports.WORKFLOW_REGISTRY = {
-    recordsWorkflow: {
-        name: 'recordsWorkflow',
-        displayName: 'Medical Records Retrieval',
-        description: 'Full workflow for contacting patients, collecting transcripts, and requesting medical records from providers',
-        category: 'production',
-        parameters: exports.RecordsWorkflowParamsSchema,
-        defaultParams: exports.RecordsWorkflowParamsSchema.parse({}),
+    endToEndWorkflow: {
+        name: 'endToEndWorkflow',
+        displayName: 'End-to-End Medical Records',
+        description: 'Complete workflow: patient outreach, transcript collection, provider records retrieval, and downstream analysis',
+        category: 'test',
+        parameters: exports.EndToEndWorkflowParamsSchema,
+        defaultParams: {
+            patientOutreach: {
+                maxAttempts: 7,
+                waitBetweenAttempts: '1 day',
+                smsTemplate: 'Please call us back to discuss your medical records.',
+            },
+            recordsRetrieval: {
+                followUpEnabled: false,
+                followUpInterval: '3 days',
+                maxFollowUps: 2,
+            },
+            call: {
+                maxDuration: 300,
+            },
+        },
     },
     patientOutreachWorkflow: {
         name: 'patientOutreachWorkflow',
         displayName: 'Patient Outreach',
         description: 'Contact patient via SMS and calls until they respond or max attempts reached',
-        category: 'production',
+        category: 'test',
         parameters: exports.PatientOutreachParamsSchema,
-        defaultParams: exports.PatientOutreachParamsSchema.parse({}),
+        defaultParams: {
+            maxAttempts: 7,
+            waitBetweenAttempts: '1 day',
+            smsTemplate: 'Please call us back to discuss your medical records.',
+        },
     },
     recordsRetrievalWorkflow: {
         name: 'recordsRetrievalWorkflow',
         displayName: 'Records Retrieval',
         description: 'Request and retrieve medical records from a healthcare provider',
-        category: 'production',
+        category: 'test',
         parameters: exports.RecordsRetrievalParamsSchema,
-        defaultParams: exports.RecordsRetrievalParamsSchema.parse({}),
+        defaultParams: {
+            followUpEnabled: false,
+            followUpInterval: '3 days',
+            maxFollowUps: 2,
+        },
     },
     testSMSWorkflow: {
         name: 'testSMSWorkflow',
@@ -67,7 +91,9 @@ exports.WORKFLOW_REGISTRY = {
         description: 'Place a test call to a patient',
         category: 'test',
         parameters: exports.CallParamsSchema,
-        defaultParams: exports.CallParamsSchema.parse({}),
+        defaultParams: {
+            maxDuration: 300,
+        },
     },
     testFaxWorkflow: {
         name: 'testFaxWorkflow',

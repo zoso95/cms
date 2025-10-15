@@ -13,6 +13,8 @@ export declare const PatientOutreachParamsSchema: z.ZodObject<{
     smsTemplate?: string | undefined;
 }>;
 export declare const RecordsRetrievalParamsSchema: z.ZodObject<{
+    providerId: z.ZodOptional<z.ZodString>;
+    providerName: z.ZodOptional<z.ZodString>;
     followUpEnabled: z.ZodDefault<z.ZodBoolean>;
     followUpInterval: z.ZodDefault<z.ZodString>;
     maxFollowUps: z.ZodDefault<z.ZodNumber>;
@@ -20,7 +22,11 @@ export declare const RecordsRetrievalParamsSchema: z.ZodObject<{
     followUpEnabled: boolean;
     followUpInterval: string;
     maxFollowUps: number;
+    providerId?: string | undefined;
+    providerName?: string | undefined;
 }, {
+    providerId?: string | undefined;
+    providerName?: string | undefined;
     followUpEnabled?: boolean | undefined;
     followUpInterval?: string | undefined;
     maxFollowUps?: number | undefined;
@@ -35,7 +41,7 @@ export declare const CallParamsSchema: z.ZodObject<{
     agentId?: string | undefined;
     maxDuration?: number | undefined;
 }>;
-export declare const RecordsWorkflowParamsSchema: z.ZodObject<{
+export declare const EndToEndWorkflowParamsSchema: z.ZodObject<{
     patientOutreach: z.ZodObject<{
         maxAttempts: z.ZodDefault<z.ZodNumber>;
         waitBetweenAttempts: z.ZodDefault<z.ZodString>;
@@ -50,6 +56,8 @@ export declare const RecordsWorkflowParamsSchema: z.ZodObject<{
         smsTemplate?: string | undefined;
     }>;
     recordsRetrieval: z.ZodObject<{
+        providerId: z.ZodOptional<z.ZodString>;
+        providerName: z.ZodOptional<z.ZodString>;
         followUpEnabled: z.ZodDefault<z.ZodBoolean>;
         followUpInterval: z.ZodDefault<z.ZodString>;
         maxFollowUps: z.ZodDefault<z.ZodNumber>;
@@ -57,7 +65,11 @@ export declare const RecordsWorkflowParamsSchema: z.ZodObject<{
         followUpEnabled: boolean;
         followUpInterval: string;
         maxFollowUps: number;
+        providerId?: string | undefined;
+        providerName?: string | undefined;
     }, {
+        providerId?: string | undefined;
+        providerName?: string | undefined;
         followUpEnabled?: boolean | undefined;
         followUpInterval?: string | undefined;
         maxFollowUps?: number | undefined;
@@ -82,6 +94,8 @@ export declare const RecordsWorkflowParamsSchema: z.ZodObject<{
         followUpEnabled: boolean;
         followUpInterval: string;
         maxFollowUps: number;
+        providerId?: string | undefined;
+        providerName?: string | undefined;
     };
     call: {
         maxDuration: number;
@@ -94,6 +108,8 @@ export declare const RecordsWorkflowParamsSchema: z.ZodObject<{
         smsTemplate?: string | undefined;
     };
     recordsRetrieval: {
+        providerId?: string | undefined;
+        providerName?: string | undefined;
         followUpEnabled?: boolean | undefined;
         followUpInterval?: string | undefined;
         maxFollowUps?: number | undefined;
@@ -106,7 +122,7 @@ export declare const RecordsWorkflowParamsSchema: z.ZodObject<{
 export type PatientOutreachParams = z.infer<typeof PatientOutreachParamsSchema>;
 export type RecordsRetrievalParams = z.infer<typeof RecordsRetrievalParamsSchema>;
 export type CallParams = z.infer<typeof CallParamsSchema>;
-export type RecordsWorkflowParams = z.infer<typeof RecordsWorkflowParamsSchema>;
+export type EndToEndWorkflowParams = z.infer<typeof EndToEndWorkflowParamsSchema>;
 export interface WorkflowMetadata {
     name: string;
     displayName: string;

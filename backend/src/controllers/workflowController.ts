@@ -5,95 +5,25 @@ import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Get available workflows catalog
+ *
+ * NOTE: This list is synced with worker/src/workflows/registry.ts
+ * If you update workflows in the registry, update this list as well.
  */
 export async function getWorkflowCatalog(req: Request, res: Response) {
   try {
-    // Simple workflow metadata (hardcoded for reliability)
-    const workflows = [
-      {
-        name: 'endToEndWorkflow',
-        displayName: 'End-to-End Medical Records',
-        description: 'Complete workflow: patient outreach, transcript collection, provider records retrieval, and downstream analysis',
-        category: 'production',
-        defaultParams: {
-          patientOutreach: {
-            maxAttempts: 7,
-            waitBetweenAttempts: '1 day',
-            smsTemplate: 'Please call us back to discuss your medical records.',
-          },
-          recordsRetrieval: {
-            followUpEnabled: false,
-            followUpInterval: '3 days',
-            maxFollowUps: 2,
-          },
-          call: {
-            maxDuration: 300,
-          },
-        },
-      },
-      {
-        name: 'patientOutreachWorkflow',
-        displayName: 'Patient Outreach',
-        description: 'Contact patient via SMS and calls until they respond or max attempts reached',
-        category: 'production',
-        defaultParams: {
-          maxAttempts: 7,
-          waitBetweenAttempts: '1 day',
-          smsTemplate: 'Please call us back to discuss your medical records.',
-        },
-      },
-      {
-        name: 'recordsRetrievalWorkflow',
-        displayName: 'Records Retrieval',
-        description: 'Request and retrieve medical records from a healthcare provider',
-        category: 'production',
-        defaultParams: {
-          providerId: '',
-          followUpEnabled: false,
-          followUpInterval: '3 days',
-          maxFollowUps: 2,
-        },
-      },
-      {
-        name: 'testSMSWorkflow',
-        displayName: 'Test SMS',
-        description: 'Send a test SMS to a patient',
-        category: 'test',
-        defaultParams: {
-          message: 'Test message from Afterimage',
-        },
-      },
-      {
-        name: 'testCallWorkflow',
-        displayName: 'Test Call',
-        description: 'Place a test call to a patient',
-        category: 'test',
-        defaultParams: {
-          maxDuration: 300,
-        },
-      },
-      {
-        name: 'testFaxWorkflow',
-        displayName: 'Test Fax',
-        description: 'Send a test fax to a number',
-        category: 'test',
-        defaultParams: {
-          faxNumber: '',
-          message: 'Test fax',
-        },
-      },
-      {
-        name: 'testEmailWorkflow',
-        displayName: 'Test Email',
-        description: 'Send a test email',
-        category: 'test',
-        defaultParams: {
-          to: '',
-          subject: 'Test email',
-          body: 'This is a test email',
-        },
-      },
-    ];
+    // Load workflows from the worker registry at runtime
+    // Using require to avoid TypeScript rootDir issues
+    const registryPath = require('path').resolve(__dirname, '../../../worker/dist/workflows/registry.js');
+    const { listWorkflows } = require(registryPath);
+
+    // Get workflows from the registry
+    const workflows = listWorkflows().map((w: any) => ({
+      name: w.name,
+      displayName: w.displayName,
+      description: w.description,
+      category: w.category,
+      defaultParams: w.defaultParams,
+    }));
 
     res.json(workflows);
   } catch (error: any) {

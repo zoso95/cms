@@ -48,7 +48,7 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     name: 'endToEndWorkflow',
     displayName: 'End-to-End Medical Records',
     description: 'Complete workflow: patient outreach, transcript collection, provider records retrieval, and downstream analysis',
-    category: 'production',
+    category: 'test',
     parameters: EndToEndWorkflowParamsSchema,
     defaultParams: {
       patientOutreach: {
@@ -70,7 +70,7 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     name: 'patientOutreachWorkflow',
     displayName: 'Patient Outreach',
     description: 'Contact patient via SMS and calls until they respond or max attempts reached',
-    category: 'production',
+    category: 'test',
     parameters: PatientOutreachParamsSchema,
     defaultParams: {
       maxAttempts: 7,
@@ -82,7 +82,7 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     name: 'recordsRetrievalWorkflow',
     displayName: 'Records Retrieval',
     description: 'Request and retrieve medical records from a healthcare provider',
-    category: 'production',
+    category: 'test',
     parameters: RecordsRetrievalParamsSchema,
     defaultParams: {
       followUpEnabled: false,
