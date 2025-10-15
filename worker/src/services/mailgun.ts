@@ -103,7 +103,11 @@ class MailgunService {
       // Attachments
       if (request.attachments) {
         request.attachments.forEach((attachment, index) => {
-          const blob = new Blob([attachment.data], { type: attachment.contentType || 'application/octet-stream' });
+          // Convert Buffer to Uint8Array for Blob constructor
+          const data = typeof attachment.data === 'string'
+            ? attachment.data
+            : new Uint8Array(attachment.data);
+          const blob = new Blob([data], { type: attachment.contentType || 'application/octet-stream' });
           formData.append('attachment', blob, attachment.filename);
         });
       }
