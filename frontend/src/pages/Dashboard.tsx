@@ -1,12 +1,55 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import PatientCaseSelector from '../components/PatientCaseSelector';
+import WorkflowSelector from '../components/WorkflowSelector';
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [showPatientSelector, setShowPatientSelector] = useState(false);
+  const [showWorkflowSelector, setShowWorkflowSelector] = useState(false);
+  const [selectedPatientCaseId, setSelectedPatientCaseId] = useState<number | null>(null);
+
   const { data: patientCases, isLoading, error } = useQuery({
     queryKey: ['patient-cases-with-workflows'],
     queryFn: api.getPatientCasesWithWorkflows,
   });
+
+  const startWorkflowMutation = useMutation({
+    mutationFn: ({ patientCaseId, workflowName, parameters, scheduledAt }: {
+      patientCaseId: number;
+      workflowName: string;
+      parameters: any;
+      scheduledAt?: string;
+    }) => api.startWorkflow(patientCaseId, workflowName, parameters, scheduledAt),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['patient-cases-with-workflows'] });
+      setShowWorkflowSelector(false);
+      setSelectedPatientCaseId(null);
+      // Navigate to the patient case detail page
+      navigate(`/cases/${variables.patientCaseId}`);
+    },
+  });
+
+  const handlePatientSelect = (patientCaseId: number) => {
+    setSelectedPatientCaseId(patientCaseId);
+    setShowPatientSelector(false);
+    setShowWorkflowSelector(true);
+  };
+
+  const handleWorkflowStart = (workflowName: string, parameters: any, scheduledAt?: string) => {
+    if (selectedPatientCaseId) {
+      startWorkflowMutation.mutate({ patientCaseId: selectedPatientCaseId, workflowName, parameters, scheduledAt });
+    }
+  };
+
+  const handleCancel = () => {
+    setShowPatientSelector(false);
+    setShowWorkflowSelector(false);
+    setSelectedPatientCaseId(null);
+  };
 
   if (isLoading) {
     return <div style={{ textAlign: 'center', padding: '3rem' }}>Loading patient cases...</div>;
@@ -22,9 +65,30 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Patient Cases with Workflows</h1>
-        <p style={{ color: '#666' }}>Patients with active or completed workflows</p>
+      <div style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Patient Cases with Workflows</h1>
+          <p style={{ color: '#666' }}>Patients with active or completed workflows</p>
+        </div>
+        <button
+          onClick={() => setShowPatientSelector(true)}
+          style={{
+            padding: '0.75rem 1.5rem',
+            borderRadius: '6px',
+            border: 'none',
+            backgroundColor: '#2563eb',
+            color: '#fff',
+            cursor: 'pointer',
+            fontSize: '0.875rem',
+            fontWeight: '500',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <span style={{ fontSize: '1.25rem' }}>+</span>
+          Create New Workflow
+        </button>
       </div>
 
       <div style={{
@@ -102,6 +166,23 @@ export default function Dashboard() {
           </tbody>
         </table>
       </div>
+
+      {/* Patient Case Selector Modal */}
+      {showPatientSelector && (
+        <PatientCaseSelector
+          onSelect={handlePatientSelect}
+          onCancel={handleCancel}
+        />
+      )}
+
+      {/* Workflow Selector Modal */}
+      {showWorkflowSelector && selectedPatientCaseId && (
+        <WorkflowSelector
+          patientCaseId={selectedPatientCaseId}
+          onStart={handleWorkflowStart}
+          onCancel={handleCancel}
+        />
+      )}
     </div>
   );
 }
