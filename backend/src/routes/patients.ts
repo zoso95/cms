@@ -16,5 +16,7 @@ router.get('/:id/providers', patientController.getPatientProviders);
 router.get('/:id/transcripts', patientController.getPatientTranscripts);
 router.get('/:id/analysis', patientController.getPatientAnalysis);
 router.get('/:id/verifications', patientController.getPatientVerifications);
+router.get('/:id/tasks', patientController.getPatientTasks);
+router.post('/:id/tasks/initialize', patientController.initializePatientTasks);
 
 export default router;

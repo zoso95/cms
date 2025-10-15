@@ -91,4 +91,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reason }),
     }),
+
+  // Tasks
+  getPatientCaseTasks: (id: string) => apiRequest<any[]>(`/patient-cases/${id}/tasks`),
+  initializePatientTasks: (id: string) =>
+    apiRequest<{ success: boolean; tasks: any[] }>(`/patient-cases/${id}/tasks/initialize`, {
+      method: 'POST',
+    }),
 };

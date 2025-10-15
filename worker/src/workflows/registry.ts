@@ -133,6 +133,14 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     }),
     defaultParams: { to: '', subject: 'Test email', body: 'This is a test email' },
   },
+  initializeTasksWorkflow: {
+    name: 'initializeTasksWorkflow',
+    displayName: 'Initialize Tasks',
+    description: 'Create default tasks for a patient case',
+    category: 'test',
+    parameters: z.object({}),
+    defaultParams: {},
+  },
 };
 
 // Helper to get workflow metadata

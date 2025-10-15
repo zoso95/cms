@@ -1244,6 +1244,128 @@ export async function logFailure(patientCaseId: number, reason: string): Promise
 }
 
 // ============================================
+// Task Management Activities
+// ============================================
+
+/**
+ * Initialize default tasks for a patient case
+ * Creates 7 default tasks if they don't already exist
+ */
+export async function initializeDefaultTasks(patientCaseId: number): Promise<string[]> {
+  console.log(`[Activity] Initializing default tasks for patient case ${patientCaseId}`);
+
+  const defaultTasks = [
+    { task_name: 'Intake Call', assigned_to: 'AI', sort_order: 1 },
+    { task_name: 'Case Evaluation', assigned_to: 'AI', sort_order: 2 },
+    { task_name: 'Extract Providers', assigned_to: 'AI', sort_order: 3 },
+    { task_name: 'Follow up call (pitch advocacy)', assigned_to: 'Ben', sort_order: 4 },
+    { task_name: 'Verify Providers', assigned_to: 'Ben', sort_order: 5 },
+    { task_name: 'Gather Releases', assigned_to: 'AI', sort_order: 6 },
+    { task_name: 'Send Out Records Requests', assigned_to: 'AI', sort_order: 7 },
+    { task_name: 'Follow up on Records Requests', assigned_to: 'Ben', sort_order: 7 },
+  ];
+
+  const taskIds: string[] = [];
+
+  for (const task of defaultTasks) {
+    const taskId = uuidv4();
+    taskIds.push(taskId);
+
+    // Use upsert to avoid duplicates
+    const { error } = await supabase
+      .from('case_tasks')
+      .upsert({
+        id: taskId,
+        patient_case_id: patientCaseId,
+        task_name: task.task_name,
+        assigned_to: task.assigned_to,
+        status: 'not_started',
+        sort_order: task.sort_order,
+      }, {
+        onConflict: 'patient_case_id,task_name',
+        ignoreDuplicates: true,
+      });
+
+    if (error) {
+      console.error(`[Activity] Error creating task "${task.task_name}":`, error);
+    }
+  }
+
+  console.log(`[Activity] Initialized ${defaultTasks.length} default tasks`);
+  return taskIds;
+}
+
+/**
+ * Update task status for a patient case
+ * @param patientCaseId - Patient case ID
+ * @param taskName - Name of the task to update
+ * @param status - New status
+ * @param notes - Optional notes to add
+ */
+export async function updateTaskStatus(
+  patientCaseId: number,
+  taskName: string,
+  status: 'not_started' | 'in_progress' | 'completed' | 'blocked' | 'failed',
+  notes?: string
+): Promise<void> {
+  console.log(`[Activity] Updating task "${taskName}" to "${status}" for patient case ${patientCaseId}`);
+
+  const updateData: any = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (notes !== undefined) {
+    updateData.notes = notes;
+  }
+
+  const { error } = await supabase
+    .from('case_tasks')
+    .update(updateData)
+    .eq('patient_case_id', patientCaseId)
+    .eq('task_name', taskName);
+
+  if (error) {
+    console.error(`[Activity] Error updating task "${taskName}":`, error);
+    throw error;
+  }
+
+  console.log(`[Activity] Task "${taskName}" updated successfully`);
+}
+
+/**
+ * Get task by name for a patient case
+ * @param patientCaseId - Patient case ID
+ * @param taskName - Name of the task to retrieve
+ * @returns Task object or null if not found
+ */
+export async function getTaskByName(
+  patientCaseId: number,
+  taskName: string
+): Promise<{
+  id: string;
+  status: string;
+  notes: string | null;
+  assigned_to: string;
+} | null> {
+  console.log(`[Activity] Getting task "${taskName}" for patient case ${patientCaseId}`);
+
+  const { data, error } = await supabase
+    .from('case_tasks')
+    .select('id, status, notes, assigned_to')
+    .eq('patient_case_id', patientCaseId)
+    .eq('task_name', taskName)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`[Activity] Error fetching task "${taskName}":`, error);
+    throw error;
+  }
+
+  return data;
+}
+
+// ============================================
 // Status Update Activities
 // ============================================
 

@@ -249,3 +249,65 @@ export async function updatePatientDetails(req: Request, res: Response) {
     res.status(500).json({ error: error.message });
   }
 }
+
+/**
+ * Get tasks for a patient case
+ */
+export async function getPatientTasks(req: Request, res: Response) {
+  try {
+    const { data, error } = await supabase
+      .from('case_tasks')
+      .select('*')
+      .eq('patient_case_id', req.params.id)
+      .order('sort_order', { ascending: true });
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * Initialize default tasks for a patient case
+ */
+export async function initializePatientTasks(req: Request, res: Response) {
+  try {
+    const patientCaseId = parseInt(req.params.id);
+
+    const defaultTasks = [
+      { task_name: 'Intake Call', assigned_to: 'AI', sort_order: 1 },
+      { task_name: 'Case Evaluation', assigned_to: 'AI', sort_order: 2 },
+      { task_name: 'Extract Providers', assigned_to: 'AI', sort_order: 3 },
+      { task_name: 'Follow up call (pitch advocacy)', assigned_to: 'Ben', sort_order: 4 },
+      { task_name: 'Verify Providers', assigned_to: 'Ben', sort_order: 5 },
+      { task_name: 'Gather Releases', assigned_to: 'AI', sort_order: 6 },
+      { task_name: 'Send Out Records Requests', assigned_to: 'AI', sort_order: 7 },
+      { task_name: 'Follow up on Records Requests', assigned_to: 'Ben', sort_order: 8 },
+    ];
+
+    const tasksToInsert = defaultTasks.map(task => ({
+      patient_case_id: patientCaseId,
+      task_name: task.task_name,
+      assigned_to: task.assigned_to,
+      status: 'not_started',
+      sort_order: task.sort_order,
+    }));
+
+    // Use upsert to avoid duplicates
+    const { data, error } = await supabase
+      .from('case_tasks')
+      .upsert(tasksToInsert, {
+        onConflict: 'patient_case_id,task_name',
+        ignoreDuplicates: false,
+      })
+      .select();
+
+    if (error) throw error;
+
+    res.json({ success: true, tasks: data });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}

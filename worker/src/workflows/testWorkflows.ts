@@ -86,3 +86,24 @@ export async function testEmailWorkflow(
   log.info('Test email workflow completed', { patientCaseId });
   return { success: true };
 }
+
+/**
+ * Initialize Tasks Workflow
+ * Creates default tasks for a patient case
+ */
+export async function initializeTasksWorkflow(
+  patientCaseId: number,
+  params: {} = {}
+): Promise<{ success: boolean; taskIds: string[] }> {
+  log.info('Initialize tasks workflow started', { patientCaseId });
+
+  await a.markWorkflowAsRunning();
+  await a.updateWorkflowStatus('Initializing default tasks');
+
+  const taskIds = await a.initializeDefaultTasks(patientCaseId);
+
+  log.info('Initialize tasks workflow completed', { patientCaseId, taskCount: taskIds.length });
+  await a.updateWorkflowStatus(`Created ${taskIds.length} default tasks`);
+
+  return { success: true, taskIds };
+}
