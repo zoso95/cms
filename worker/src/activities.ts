@@ -398,62 +398,40 @@ export async function scheduleCall(patientCaseId: number, message: string): Prom
 }
 
 export async function collectTranscript(patientCaseId: number): Promise<string> {
-  console.log(`[Activity] Collecting transcript for patient case ${patientCaseId}`);
+  console.log(`[Activity] Collecting all transcripts for patient case ${patientCaseId}`);
 
-  const workflowExecutionId = await getWorkflowExecutionIdFromDb(patientCaseId);
-
-  // Get the most recent completed call from ElevenLabs
-  const { data: call, error: callError } = await supabase
+  // Get ALL completed calls from ElevenLabs for this patient
+  const { data: calls, error: callError } = await supabase
     .from('elevenlabs_calls')
     .select('*')
     .eq('patient_case_id', patientCaseId)
     .eq('status', 'completed')
-    .order('completed_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .not('transcript_text', 'is', null)
+    .order('completed_at', { ascending: true }); // Chronological order
 
   if (callError) {
-    console.error(`[Activity] Error fetching call: ${callError.message}`);
+    console.error(`[Activity] Error fetching calls: ${callError.message}`);
     throw callError;
   }
 
-  if (!call) {
-    console.error(`[Activity] No completed call found for patient case ${patientCaseId}`);
-    throw new Error(`No completed call found for patient case ${patientCaseId}`);
+  if (!calls || calls.length === 0) {
+    console.error(`[Activity] No completed calls found for patient case ${patientCaseId}`);
+    throw new Error(`No completed calls found for patient case ${patientCaseId}`);
   }
 
-  if (!call.transcript_text) {
-    console.error(`[Activity] Call ${call.id} has no transcript text`);
-    throw new Error(`Call ${call.id} has no transcript text`);
-  }
+  console.log(`[Activity] Found ${calls.length} completed call(s) with transcripts`);
 
-  console.log(`[Activity] Found transcript for call ${call.id}, length: ${call.transcript_text.length} chars`);
+  // Concatenate all transcripts chronologically
+  const combinedTranscript = calls.map((call, index) => {
+    const callDate = new Date(call.completed_at).toLocaleString();
+    const direction = call.workflow_id?.startsWith('inbound-') ? 'INBOUND' : 'OUTBOUND';
+    return `--- Call ${index + 1} (${direction}, ${callDate}) ---\n${call.transcript_text}`;
+  }).join('\n\n');
 
-  // Get the most recent call communication log
-  const { data: callLog } = await supabase
-    .from('communication_logs')
-    .select('id')
-    .eq('patient_case_id', patientCaseId)
-    .eq('type', 'call')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  console.log(`[Activity] Combined transcript length: ${combinedTranscript.length} chars`);
+  console.log(`[Activity] Note: Transcripts already stored in call_transcripts by webhook`);
 
-  // Store transcript in call_transcripts table
-  await supabase
-    .from('call_transcripts')
-    .insert({
-      id: uuidv4(),
-      patient_case_id: patientCaseId,
-      workflow_execution_id: workflowExecutionId,
-      communication_log_id: callLog?.id,
-      transcript: call.transcript_text,
-      analysis: call.analysis || {},
-    });
-
-  console.log(`[Activity] Stored transcript in call_transcripts table`);
-
-  return call.transcript_text;
+  return combinedTranscript;
 }
 
 // ============================================

@@ -56,15 +56,38 @@ async function handlePostCallTranscription(data: any, webhookEventId: string) {
   console.log(`📞 Call duration: ${data.metadata?.call_duration_secs} seconds`);
   console.log(`✅ Call successful: ${data.analysis?.call_successful}`);
 
-  // Find the call record
-  const { data: callRecord } = await supabase
+  // Find the call record - try by conversation_id first, then by call_sid
+  let { data: callRecord } = await supabase
     .from('elevenlabs_calls')
     .select('*')
     .eq('conversation_id', data.conversation_id)
     .maybeSingle();
 
+  // If not found by conversation_id, try by call_sid (for inbound calls)
+  if (!callRecord && data.metadata?.phone_call?.call_sid) {
+    const callSid = data.metadata.phone_call.call_sid;
+    console.log(`🔍 Conversation ID lookup failed, trying call_sid: ${callSid}`);
+
+    const result = await supabase
+      .from('elevenlabs_calls')
+      .select('*')
+      .eq('call_sid', callSid)
+      .maybeSingle();
+
+    callRecord = result.data;
+
+    // If found, update the record with the conversation_id
+    if (callRecord) {
+      console.log(`✅ Found call record by call_sid, updating with conversation_id`);
+      await supabase
+        .from('elevenlabs_calls')
+        .update({ conversation_id: data.conversation_id })
+        .eq('id', callRecord.id);
+    }
+  }
+
   if (!callRecord) {
-    console.error(`❌ No call record found for conversation ${data.conversation_id}`);
+    console.error(`❌ No call record found for conversation ${data.conversation_id} or call_sid ${data.metadata?.phone_call?.call_sid}`);
     // Mark webhook as processed with error
     await supabase.from('webhook_events').update({
       processed: true,
@@ -124,16 +147,34 @@ async function handlePostCallTranscription(data: any, webhookEventId: string) {
 
   console.log(`✅ Updated call record ${callRecord.id} - talked_to_human: ${talkedToHuman}`);
 
+  // Determine call direction (inbound vs outbound)
+  const callDirection = data.metadata?.phone_call?.direction === 'inbound' ? 'inbound' : 'outbound';
+  const isInboundCall = callDirection === 'inbound';
+  console.log(`📞 Call direction: ${callDirection}`);
+
+  // For outbound calls, find the actual workflow_execution_id
+  let workflowExecutionId = null;
+  if (!isInboundCall && callRecord.workflow_id && !callRecord.workflow_id.startsWith('inbound-')) {
+    const { data: workflowExec } = await supabase
+      .from('workflow_executions')
+      .select('id')
+      .eq('workflow_id', callRecord.workflow_id)
+      .maybeSingle();
+
+    workflowExecutionId = workflowExec?.id || null;
+  }
+
   // Log to communication_logs
-  await supabase
+  const commLogId = uuidv4();
+  const { error: commLogError } = await supabase
     .from('communication_logs')
     .insert({
-      id: uuidv4(),
+      id: commLogId,
       patient_case_id: callRecord.patient_case_id,
-      workflow_execution_id: callRecord.id,
+      workflow_execution_id: workflowExecutionId,
       type: 'call',
-      direction: 'outbound',
-      status: 'completed',
+      direction: callDirection,
+      status: 'delivered', // Use 'delivered' for completed calls (matches the status constraint)
       content: transcriptText,
       metadata: {
         conversation_id: data.conversation_id,
@@ -144,23 +185,51 @@ async function handlePostCallTranscription(data: any, webhookEventId: string) {
       },
     });
 
+  if (commLogError) {
+    console.error(`❌ Failed to insert communication log: ${commLogError.message}`, commLogError);
+    throw commLogError; // Stop processing if we can't log the communication
+  }
+
   console.log(`✅ Logged call completion to communication_logs`);
 
-  // Send signal to workflow
-  try {
-    const client = await getTemporalClient();
-    const handle = client.workflow.getHandle(callRecord.workflow_id);
-
-    await handle.signal('callCompleted', {
-      conversationId: data.conversation_id,
-      talkedToHuman,
-      failed: false,
+  // Store transcript in call_transcripts table
+  // For inbound calls, there's no workflow execution, so workflow_execution_id should be null
+  const { error: transcriptError } = await supabase
+    .from('call_transcripts')
+    .insert({
+      id: uuidv4(),
+      patient_case_id: callRecord.patient_case_id,
+      workflow_execution_id: workflowExecutionId,
+      communication_log_id: commLogId,
+      transcript: transcriptText,
+      analysis: data.analysis || {},
     });
 
-    console.log(`✅ Sent callCompleted signal to workflow ${callRecord.workflow_id}`);
-  } catch (error: any) {
-    console.error(`❌ Failed to send signal to workflow: ${error.message}`);
-    // Don't fail the webhook - the workflow will fall back to polling
+  if (transcriptError) {
+    console.error(`❌ Failed to store transcript: ${transcriptError.message}`, transcriptError);
+  } else {
+    console.log(`✅ Stored transcript in call_transcripts table`);
+  }
+
+  // Send signal to workflow (skip for inbound calls that don't have a real workflow)
+  if (!callRecord.workflow_id.startsWith('inbound-')) {
+    try {
+      const client = await getTemporalClient();
+      const handle = client.workflow.getHandle(callRecord.workflow_id);
+
+      await handle.signal('callCompleted', {
+        conversationId: data.conversation_id,
+        talkedToHuman,
+        failed: false,
+      });
+
+      console.log(`✅ Sent callCompleted signal to workflow ${callRecord.workflow_id}`);
+    } catch (error: any) {
+      console.error(`❌ Failed to send signal to workflow: ${error.message}`);
+      // Don't fail the webhook - the workflow will fall back to polling
+    }
+  } else {
+    console.log(`⏭️  Skipping workflow signal for inbound call (no workflow)`);
   }
 
   // Mark webhook as successfully processed
@@ -231,13 +300,25 @@ async function handleCallInitiationFailure(data: any, webhookEventId: string) {
 
   console.log(`✅ Marked call ${failedCall.id} as failed (${data.failure_reason})`);
 
+  // Find the actual workflow_execution_id
+  let workflowExecutionId = null;
+  if (failedCall.workflow_id && !failedCall.workflow_id.startsWith('inbound-')) {
+    const { data: workflowExec } = await supabase
+      .from('workflow_executions')
+      .select('id')
+      .eq('workflow_id', failedCall.workflow_id)
+      .maybeSingle();
+
+    workflowExecutionId = workflowExec?.id || null;
+  }
+
   // Log to communication_logs
   await supabase
     .from('communication_logs')
     .insert({
       id: uuidv4(),
       patient_case_id: failedCall.patient_case_id,
-      workflow_execution_id: failedCall.id,
+      workflow_execution_id: workflowExecutionId,
       type: 'call',
       direction: 'outbound',
       status: 'failed',
