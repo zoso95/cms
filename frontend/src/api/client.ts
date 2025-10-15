@@ -19,7 +19,13 @@ export async function apiRequest<T>(endpoint: string, options?: RequestInit): Pr
 
 export const api = {
   // Patient cases
-  getPatientCases: () => apiRequest<any[]>('/patient-cases'),
+  getPatientCases: (page?: number, limit?: number) => {
+    const params = new URLSearchParams();
+    if (page) params.append('page', page.toString());
+    if (limit) params.append('limit', limit.toString());
+    const query = params.toString();
+    return apiRequest<{ data: any[]; pagination: { page: number; limit: number; total: number; totalPages: number } }>(`/patient-cases${query ? '?' + query : ''}`);
+  },
   getPatientCasesWithWorkflows: () => apiRequest<any[]>('/patient-cases-with-workflows'),
   getPatientCase: (id: string) => apiRequest<any>(`/patient-cases/${id}`),
 

@@ -2,18 +2,39 @@ import { Request, Response } from 'express';
 import { supabase } from '../db';
 
 /**
- * Get all patient cases
+ * Get all patient cases with pagination
  */
 export async function getAllPatientCases(req: Request, res: Response) {
   try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = (page - 1) * limit;
+
+    // Get total count
+    const { count, error: countError } = await supabase
+      .from('patient_cases')
+      .select('*', { count: 'exact', head: true });
+
+    if (countError) throw countError;
+
+    // Get paginated data
     const { data, error } = await supabase
       .from('patient_cases')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (error) throw error;
 
-    res.json(data);
+    res.json({
+      data,
+      pagination: {
+        page,
+        limit,
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit),
+      },
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import PatientCaseSelector from '../components/PatientCaseSelector';
 import WorkflowSelector from '../components/WorkflowSelector';
+import { getPriorityLabel, getPriorityColor, getStatusColor } from '../utils/patientHelpers';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -11,10 +12,28 @@ export default function Dashboard() {
   const [showPatientSelector, setShowPatientSelector] = useState(false);
   const [showWorkflowSelector, setShowWorkflowSelector] = useState(false);
   const [selectedPatientCaseId, setSelectedPatientCaseId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit] = useState(50);
 
-  const { data: patientCases, isLoading, error } = useQuery({
+  const { data: patientCasesWithWorkflows, isLoading: loadingWithWorkflows, error: errorWithWorkflows } = useQuery({
     queryKey: ['patient-cases-with-workflows'],
     queryFn: api.getPatientCasesWithWorkflows,
+  });
+
+  const { data: allPatientCasesResponse, isLoading: loadingAllCases, error: errorAllCases } = useQuery({
+    queryKey: ['patient-cases', page, limit],
+    queryFn: () => api.getPatientCases(page, limit),
+  });
+
+  const isLoading = loadingWithWorkflows || loadingAllCases;
+  const error = errorWithWorkflows || errorAllCases;
+
+  const allPatientCases = allPatientCasesResponse?.data || [];
+  const pagination = allPatientCasesResponse?.pagination;
+
+  // Calculate patients without workflows
+  const patientCasesWithoutWorkflows = allPatientCases.filter((patientCase: any) => {
+    return !patientCasesWithWorkflows?.some((pc: any) => pc.id === patientCase.id);
   });
 
   const startWorkflowMutation = useMutation({
@@ -113,6 +132,15 @@ export default function Dashboard() {
                 Condition
               </th>
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                State
+              </th>
+              <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                Incident Date
+              </th>
+              <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                Priority
+              </th>
+              <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
                 Status
               </th>
               <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
@@ -124,14 +152,41 @@ export default function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {patientCases?.map((patientCase: any) => (
+            {patientCasesWithWorkflows?.map((patientCase: any) => (
               <tr key={patientCase.id} style={{ borderBottom: '1px solid #e5e5e5' }}>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.id}</td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
                   {patientCase.first_name} {patientCase.last_name}
                 </td>
                 <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.phone || 'N/A'}</td>
-                <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.condition || 'N/A'}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                  <div style={{
+                    maxWidth: '400px',
+                    maxHeight: '60px',
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    wordWrap: 'break-word',
+                  }}>
+                    {patientCase.condition || 'N/A'}
+                  </div>
+                </td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.state || 'N/A'}</td>
+                <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                  {patientCase.incident_date ? new Date(patientCase.incident_date).toLocaleDateString() : 'N/A'}
+                </td>
+                <td style={{ padding: '0.75rem 1rem' }}>
+                  <span style={{
+                    display: 'inline-block',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.75rem',
+                    fontWeight: '500',
+                    backgroundColor: getPriorityColor(patientCase.priority),
+                    color: '#fff'
+                  }}>
+                    {getPriorityLabel(patientCase.priority)}
+                  </span>
+                </td>
                 <td style={{ padding: '0.75rem 1rem' }}>
                   <span style={{
                     display: 'inline-block',
@@ -167,6 +222,211 @@ export default function Dashboard() {
         </table>
       </div>
 
+      {/* Patients Without Workflows */}
+      {patientCasesWithoutWorkflows.length > 0 && (
+        <>
+          <div style={{ marginTop: '3rem', marginBottom: '2rem' }}>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>
+              Patient Cases Without Workflows
+            </h2>
+            <p style={{ color: '#666' }}>Patients that haven't had workflows started yet</p>
+          </div>
+
+          <div style={{
+            backgroundColor: '#fff',
+            borderRadius: '8px',
+            border: '1px solid #e5e5e5',
+            overflow: 'hidden'
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e5e5' }}>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    ID
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Name
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Phone
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Condition
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    State
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Incident Date
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Priority
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Status
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Created
+                  </th>
+                  <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#374151' }}>
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {patientCasesWithoutWorkflows.map((patientCase: any) => (
+                  <tr key={patientCase.id} style={{ borderBottom: '1px solid #e5e5e5' }}>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.id}</td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                      {patientCase.first_name} {patientCase.last_name}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.phone || 'N/A'}</td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                      <div style={{
+                        maxWidth: '400px',
+                        maxHeight: '60px',
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        wordWrap: 'break-word',
+                      }}>
+                        {patientCase.condition || 'N/A'}
+                      </div>
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.state || 'N/A'}</td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                      {patientCase.incident_date ? new Date(patientCase.incident_date).toLocaleDateString() : 'N/A'}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '9999px',
+                        fontSize: '0.75rem',
+                        fontWeight: '500',
+                        backgroundColor: getPriorityColor(patientCase.priority),
+                        color: '#fff'
+                      }}>
+                        {getPriorityLabel(patientCase.priority)}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '9999px',
+                        fontSize: '0.75rem',
+                        fontWeight: '500',
+                        backgroundColor: getStatusColor(patientCase.status),
+                        color: '#fff'
+                      }}>
+                        {patientCase.status || 'pending'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                      {new Date(patientCase.created_at).toLocaleDateString()}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem' }}>
+                      <Link
+                        to={`/cases/${patientCase.id}`}
+                        style={{
+                          color: '#2563eb',
+                          textDecoration: 'none',
+                          fontSize: '0.875rem',
+                          fontWeight: '500'
+                        }}
+                      >
+                        View Details →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Pagination Controls */}
+            {pagination && pagination.totalPages > 1 && (
+              <div style={{
+                padding: '1rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                backgroundColor: '#f9fafb',
+                borderTop: '1px solid #e5e5e5',
+              }}>
+                <div style={{ fontSize: '0.875rem', color: '#666' }}>
+                  Showing {((page - 1) * limit) + 1} to {Math.min(page * limit, pagination.total)} of {pagination.total} patient cases
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => setPage(p => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '4px',
+                      border: '1px solid #e5e5e5',
+                      backgroundColor: page === 1 ? '#f3f4f6' : '#fff',
+                      cursor: page === 1 ? 'not-allowed' : 'pointer',
+                      fontSize: '0.875rem',
+                      color: page === 1 ? '#9ca3af' : '#374151',
+                    }}
+                  >
+                    Previous
+                  </button>
+                  <div style={{ display: 'flex', gap: '0.25rem' }}>
+                    {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                      let pageNum;
+                      if (pagination.totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (page <= 3) {
+                        pageNum = i + 1;
+                      } else if (page >= pagination.totalPages - 2) {
+                        pageNum = pagination.totalPages - 4 + i;
+                      } else {
+                        pageNum = page - 2 + i;
+                      }
+
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setPage(pageNum)}
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            borderRadius: '4px',
+                            border: '1px solid #e5e5e5',
+                            backgroundColor: page === pageNum ? '#2563eb' : '#fff',
+                            color: page === pageNum ? '#fff' : '#374151',
+                            cursor: 'pointer',
+                            fontSize: '0.875rem',
+                            fontWeight: page === pageNum ? '500' : '400',
+                          }}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setPage(p => Math.min(pagination.totalPages, p + 1))}
+                    disabled={page === pagination.totalPages}
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '4px',
+                      border: '1px solid #e5e5e5',
+                      backgroundColor: page === pagination.totalPages ? '#f3f4f6' : '#fff',
+                      cursor: page === pagination.totalPages ? 'not-allowed' : 'pointer',
+                      fontSize: '0.875rem',
+                      color: page === pagination.totalPages ? '#9ca3af' : '#374151',
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {/* Patient Case Selector Modal */}
       {showPatientSelector && (
         <PatientCaseSelector
@@ -185,19 +445,4 @@ export default function Dashboard() {
       )}
     </div>
   );
-}
-
-function getStatusColor(status: string | null) {
-  switch (status?.toLowerCase()) {
-    case 'pending':
-      return '#9ca3af';
-    case 'in_progress':
-      return '#3b82f6';
-    case 'completed':
-      return '#10b981';
-    case 'failed':
-      return '#ef4444';
-    default:
-      return '#6b7280';
-  }
 }

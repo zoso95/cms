@@ -10,10 +10,12 @@ interface PatientCaseSelectorProps {
 export default function PatientCaseSelector({ onSelect, onCancel }: PatientCaseSelectorProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data: allPatientCases, isLoading } = useQuery({
-    queryKey: ['patient-cases'],
-    queryFn: api.getPatientCases,
+  const { data: allPatientCasesResponse, isLoading } = useQuery({
+    queryKey: ['patient-cases-all'],
+    queryFn: () => api.getPatientCases(1, 10000), // Get all for search purposes
   });
+
+  const allPatientCases = allPatientCasesResponse?.data || [];
 
   // Filter patient cases based on search query
   const filteredCases = allPatientCases?.filter((patientCase: any) => {
