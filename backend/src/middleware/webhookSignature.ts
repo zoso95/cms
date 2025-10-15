@@ -2,6 +2,43 @@ import { Request, Response, NextFunction } from 'express';
 import * as crypto from 'crypto';
 
 /**
+ * Middleware to validate ElevenLabs inbound call webhook secret
+ * Inbound calls use a simple x-webhook-secret header instead of HMAC signature
+ */
+export function validateElevenLabsInboundSecret(req: Request, res: Response, next: NextFunction) {
+  try {
+    console.log('🎯 ElevenLabs inbound call webhook received!');
+    console.log('📋 Headers:', req.headers);
+
+    // Get the secret from the header
+    const webhookSecret = req.headers['x-webhook-secret'];
+
+    // Get the expected secret from environment
+    const expectedSecret = process.env.ELEVENLABS_INBOUND_WEBHOOK_SECRET;
+
+    // If no expected secret is set, just log a warning and continue
+    if (!expectedSecret) {
+      console.warn('⚠️  ELEVENLABS_INBOUND_WEBHOOK_SECRET not set - skipping validation');
+      next();
+      return;
+    }
+
+    // Validate the secret
+    if (webhookSecret !== expectedSecret) {
+      console.error('❌ Invalid webhook secret');
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    console.log('✅ ElevenLabs inbound webhook secret validated');
+
+    next();
+  } catch (error: any) {
+    console.error('Error validating inbound webhook secret:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
  * Middleware to validate ElevenLabs webhook signature
  */
 export function validateElevenLabsSignature(req: Request, res: Response, next: NextFunction) {

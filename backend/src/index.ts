@@ -10,7 +10,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import routes from './routes';
 import * as webhookController from './controllers/webhookController';
-import { validateElevenLabsSignature } from './middleware/webhookSignature';
+import { validateElevenLabsSignature, validateElevenLabsInboundSecret } from './middleware/webhookSignature';
 import { requireTemporalUIAuth } from './middleware/temporalUIAuth';
 
 config();
@@ -55,12 +55,19 @@ app.use(session({
   },
 }));
 
-// ElevenLabs webhook route MUST come before express.json() to preserve raw body
+// ElevenLabs webhook routes MUST come before express.json() to preserve raw body
 app.post(
   '/api/webhooks/elevenlabs/conversation',
   express.raw({ type: '*/*' }),
   validateElevenLabsSignature,
   webhookController.handleElevenLabsWebhook
+);
+
+app.post(
+  '/api/webhooks/elevenlabs/inbound-call',
+  express.raw({ type: '*/*' }),
+  validateElevenLabsInboundSecret,
+  webhookController.handleElevenLabsInboundCall
 );
 
 // Apply JSON parsing to all other routes

@@ -514,3 +514,249 @@ export async function handleTwilioTranscriptionWebhook(req: Request, res: Respon
     res.status(500).json({ error: error.message });
   }
 }
+
+/**
+ * Normalize phone number for lookup
+ */
+function normalizePhoneNumber(phone: string): string {
+  // Remove all non-digit characters
+  let normalized = phone.replace(/\D/g, '');
+
+  // If it starts with 1 and is 11 digits, keep it as is
+  // If it's 10 digits, add country code
+  if (normalized.length === 10) {
+    normalized = '1' + normalized;
+  }
+
+  // Add + prefix for E.164 format
+  if (!normalized.startsWith('+')) {
+    normalized = '+' + normalized;
+  }
+
+  return normalized;
+}
+
+/**
+ * Handle ElevenLabs inbound call webhook
+ * This is called when someone calls into the ElevenLabs agent
+ * We need to provide customer context so the agent knows who they're talking to
+ */
+export async function handleElevenLabsInboundCall(req: Request, res: Response) {
+  try {
+    // ElevenLabs sends the request body as a Buffer
+    let bodyStr: string;
+    if (Buffer.isBuffer(req.body)) {
+      bodyStr = req.body.toString('utf8');
+      console.log(`📞 [ELEVENLABS INBOUND] Converted buffer to string: ${bodyStr}`);
+    } else if (typeof req.body === 'string') {
+      bodyStr = req.body;
+      console.log(`📞 [ELEVENLABS INBOUND] Body is already string: ${bodyStr}`);
+    } else {
+      bodyStr = JSON.stringify(req.body);
+      console.log(`📞 [ELEVENLABS INBOUND] Body as JSON: ${bodyStr}`);
+    }
+
+    // Parse the JSON string to get call data
+    const callData = JSON.parse(bodyStr);
+    console.log(`📞 [ELEVENLABS INBOUND] Parsed call data: ${JSON.stringify(callData)}`);
+
+    const { caller_id, agent_id, called_number, call_sid } = callData;
+
+    console.log(`📞 [ELEVENLABS INBOUND] Call from ${caller_id} to agent ${agent_id}`);
+    console.log(`   Call SID: ${call_sid}`);
+    console.log(`   Called Number: ${called_number}`);
+
+    // Find patient case by phone number
+    // Build multiple format variations to check
+    const digitsOnly = caller_id.replace(/\D/g, '');
+    const last10 = digitsOnly.slice(-10);
+
+    // Common phone number formats to try
+    const phoneFormats = [
+      caller_id,                                                              // Original: +14155334125
+      `+1${last10}`,                                                         // E.164: +14155334125
+      `+${last10}`,                                                          // E.164 no country: +4155334125
+      last10,                                                                 // Just 10 digits: 4155334125
+      `1${last10}`,                                                          // 11 digits: 14155334125
+      `(${last10.slice(0, 3)}) ${last10.slice(3, 6)}-${last10.slice(6)}`,  // Formatted: (415) 533-4125
+      `${last10.slice(0, 3)}-${last10.slice(3, 6)}-${last10.slice(6)}`,    // Dashed: 415-533-4125
+    ];
+
+    console.log(`🔍 Looking up patient case for phone: ${caller_id}`);
+    console.log(`   Trying ${phoneFormats.length} format variations`);
+
+    // Try all formats in a single query using .in()
+    const { data: patientCases, error: lookupError } = await supabase
+      .from('patient_cases')
+      .select('*')
+      .in('phone', phoneFormats)
+      .limit(1);
+
+    if (lookupError) {
+      console.error(`❌ Error looking up patient: ${lookupError.message}`);
+    }
+
+    if (!patientCases || patientCases.length === 0) {
+      console.log(`⚠️  No patient case found for ${caller_id} - providing minimal context`);
+
+      // No patient found - provide minimal context
+      return res.status(200).json({
+        type: 'conversation_initiation_client_data',
+        dynamic_variables: {
+          customer_name: 'caller',
+          customer_context: JSON.stringify({
+            status: 'new_caller',
+            message: 'First time caller - no existing information',
+            phone: caller_id
+          })
+        }
+      });
+    }
+
+    const patientCase = patientCases[0];
+    console.log(`✅ Found patient case: ${patientCase.first_name} ${patientCase.last_name} (ID: ${patientCase.id})`);
+
+    // Gather comprehensive context about this patient
+    console.log(`📊 Gathering comprehensive context for patient ${patientCase.id}...`);
+
+    // Fetch all related data
+    const [
+      { data: communications },
+      { data: providers },
+      { data: transcripts },
+      { data: workflowExecutions },
+      { data: analysis }
+    ] = await Promise.all([
+      supabase.from('communication_logs').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }),
+      supabase.from('providers').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }),
+      supabase.from('call_transcripts').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }),
+      supabase.from('workflow_executions').select('*').eq('patient_case_id', patientCase.id).order('started_at', { ascending: false }),
+      supabase.from('claude_case_analysis').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+    ]);
+
+    // Build dynamic variables for ElevenLabs
+    const dynamicVariables: Record<string, any> = {
+      // Patient info
+      customer_name: patientCase.first_name || 'caller',
+      first_name: patientCase.first_name || '',
+      last_name: patientCase.last_name || '',
+      phone: patientCase.phone || '',
+      email: patientCase.email || '',
+      patient_status: patientCase.status || '',
+
+      // Counts for quick reference
+      total_communications: communications?.length || 0,
+      total_providers: providers?.length || 0,
+      total_transcripts: transcripts?.length || 0,
+      call_count: communications?.filter(c => c.type === 'call').length || 0,
+      sms_count: communications?.filter(c => c.type === 'sms').length || 0,
+      email_count: communications?.filter(c => c.type === 'email').length || 0,
+      fax_count: communications?.filter(c => c.type === 'fax').length || 0,
+    };
+
+    // Add workflow info if available
+    if (workflowExecutions && workflowExecutions.length > 0) {
+      const activeWorkflow = workflowExecutions.find(w => w.status === 'running') || workflowExecutions[0];
+      dynamicVariables.has_active_workflow = activeWorkflow.status === 'running';
+      dynamicVariables.workflow_status = activeWorkflow.status;
+      dynamicVariables.workflow_name = activeWorkflow.workflow_name || '';
+    }
+
+    // Add provider info if available
+    if (providers && providers.length > 0) {
+      dynamicVariables.has_providers = true;
+      dynamicVariables.provider_count = providers.length;
+    } else {
+      dynamicVariables.has_providers = false;
+    }
+
+    // Build comprehensive customer context
+    const customerContext = {
+      patient_case_id: patientCase.id,
+      patient_info: {
+        first_name: patientCase.first_name,
+        last_name: patientCase.last_name,
+        email: patientCase.email,
+        phone: patientCase.phone,
+        status: patientCase.status,
+        details: patientCase.details
+      },
+      communications: communications || [],
+      providers: providers || [],
+      transcripts: transcripts?.map(t => ({
+        id: t.id,
+        created_at: t.created_at,
+        transcript_preview: t.transcript
+      })) || [],
+      workflow_executions: workflowExecutions?.map(w => ({
+        id: w.id,
+        workflow_id: w.workflow_id,
+        workflow_name: w.workflow_name,
+        status: w.status,
+        started_at: w.started_at,
+        completed_at: w.completed_at
+      })) || [],
+      case_analysis: analysis ? {
+        quality_score: analysis.quality_score,
+        summary: analysis.summary,
+        medical_subject: analysis.medical_subject,
+        next_actions: analysis.next_actions
+      } : null,
+      metadata: {
+        generated_at: new Date().toISOString(),
+        call_type: 'inbound'
+      }
+    };
+
+    // Add customer_context as stringified JSON
+    dynamicVariables.customer_context = JSON.stringify(customerContext);
+
+    console.log(`✅ Sending context with ${Object.keys(dynamicVariables).length} dynamic variables`);
+    console.log(`   customer_context size: ${dynamicVariables.customer_context.length} chars`);
+
+    // Create elevenlabs_calls record for inbound call
+    // Note: We don't have the conversation_id yet (ElevenLabs will send it later)
+    // So we store the call_sid and will update with conversation_id when we get the completion webhook
+    const { data: callRecord, error: dbError } = await supabase
+      .from('elevenlabs_calls')
+      .insert({
+        id: uuidv4(),
+        patient_case_id: patientCase.id,
+        workflow_id: `inbound-${call_sid}`, // Placeholder workflow_id for inbound calls
+        call_sid: call_sid,
+        to_number: called_number, // The number that was called
+        agent_id: agent_id,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (dbError) {
+      console.error(`⚠️ Failed to create call record: ${dbError.message}`);
+    } else {
+      console.log(`✅ Created inbound call record: ${callRecord.id} (call_sid: ${call_sid})`);
+    }
+
+    // Return context to ElevenLabs
+    return res.status(200).json({
+      type: 'conversation_initiation_client_data',
+      dynamic_variables: dynamicVariables
+    });
+
+  } catch (error: any) {
+    console.error('❌ [ELEVENLABS INBOUND] Error:', error);
+
+    // Return minimal context on error so call doesn't fail
+    return res.status(200).json({
+      type: 'conversation_initiation_client_data',
+      dynamic_variables: {
+        customer_name: 'caller',
+        customer_context: JSON.stringify({
+          status: 'error',
+          message: 'Error loading customer information'
+        })
+      }
+    });
+  }
+}
