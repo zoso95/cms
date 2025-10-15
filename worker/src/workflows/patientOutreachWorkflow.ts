@@ -44,6 +44,9 @@ export async function patientOutreachWorkflow(
 ): Promise<PatientOutreachResult> {
   log.info('Starting patient outreach workflow', { patientCaseId, params });
 
+  // Mark workflow as running (in case it was scheduled)
+  await a.markWorkflowAsRunning();
+
   // Set up pause/resume handlers
   setupPauseHandlers();
 

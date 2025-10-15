@@ -28,6 +28,9 @@ export async function endToEndWorkflow(
   patientCaseId: number,
   params?: Partial<EndToEndWorkflowParams>
 ) {
+  // Mark workflow as running (in case it was scheduled)
+  await a.markWorkflowAsRunning();
+
   // Set up pause/resume handlers with child propagation
   setupPauseHandlers();
 

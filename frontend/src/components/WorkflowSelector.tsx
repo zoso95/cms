@@ -4,7 +4,7 @@ import { api } from '../api/client';
 
 interface WorkflowSelectorProps {
   patientCaseId: number;
-  onStart: (workflowName: string, parameters: any) => void;
+  onStart: (workflowName: string, parameters: any, scheduledAt?: string) => void;
   onCancel: () => void;
 }
 
@@ -17,6 +17,8 @@ export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStar
   const [selectedWorkflow, setSelectedWorkflow] = useState<any>(null);
   const [parameters, setParameters] = useState<Record<string, any>>({});
   const [showSource, setShowSource] = useState(false);
+  const [enableScheduling, setEnableScheduling] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState('');
 
   const { data: sourceData } = useQuery({
     queryKey: ['workflow-source', selectedWorkflow?.name],
@@ -269,6 +271,44 @@ export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStar
               )}
             </div>
 
+            <div style={{ marginBottom: '1.5rem', padding: '1rem', border: '1px solid #e5e5e5', borderRadius: '6px', backgroundColor: '#f9fafb' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <input
+                  type="checkbox"
+                  id="enable-scheduling"
+                  checked={enableScheduling}
+                  onChange={(e) => setEnableScheduling(e.target.checked)}
+                  style={{ width: '1rem', height: '1rem', cursor: 'pointer' }}
+                />
+                <label htmlFor="enable-scheduling" style={{ fontSize: '0.875rem', fontWeight: '500', cursor: 'pointer' }}>
+                  Schedule for later
+                </label>
+              </div>
+
+              {enableScheduling && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
+                    Start time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.5rem',
+                      border: '1px solid #e5e5e5',
+                      borderRadius: '4px',
+                      fontSize: '0.875rem',
+                    }}
+                  />
+                  <p style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.25rem' }}>
+                    Workflow will start at the specified time
+                  </p>
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <button
                 onClick={() => setSelectedWorkflow(null)}
@@ -297,7 +337,7 @@ export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStar
                 Cancel
               </button>
               <button
-                onClick={() => onStart(selectedWorkflow.name, parameters)}
+                onClick={() => onStart(selectedWorkflow.name, parameters, enableScheduling ? scheduledAt : undefined)}
                 style={{
                   padding: '0.5rem 1rem',
                   borderRadius: '6px',
@@ -309,7 +349,7 @@ export default function WorkflowSelector({ patientCaseId: _patientCaseId, onStar
                   fontWeight: '500',
                 }}
               >
-                Start Workflow
+                {enableScheduling ? 'Schedule Workflow' : 'Start Workflow'}
               </button>
             </div>
           </div>

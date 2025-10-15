@@ -61,9 +61,15 @@ function WorkflowCard({
               )}
             </p>
           )}
-          <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.5rem' }}>
-            Started: {new Date(workflow.started_at).toLocaleString()}
-          </p>
+          {workflow.status === 'scheduled' && workflow.scheduled_at ? (
+            <p style={{ fontSize: '0.875rem', color: '#2563eb', marginTop: '0.5rem', fontWeight: '500' }}>
+              Scheduled to run at: {new Date(workflow.scheduled_at).toLocaleString()}
+            </p>
+          ) : (
+            <p style={{ fontSize: '0.875rem', color: '#666', marginTop: '0.5rem' }}>
+              Started: {new Date(workflow.started_at).toLocaleString()}
+            </p>
+          )}
           {workflow.completed_at && (
             <p style={{ fontSize: '0.875rem', color: '#666' }}>
               Completed: {new Date(workflow.completed_at).toLocaleString()}
@@ -112,7 +118,9 @@ function WorkflowCard({
             fontSize: '0.75rem',
             fontWeight: '500',
             backgroundColor:
-              workflow.status === 'running'
+              workflow.status === 'scheduled'
+                ? '#8b5cf6'
+                : workflow.status === 'running'
                 ? '#3b82f6'
                 : workflow.status === 'completed'
                 ? '#10b981'
@@ -762,8 +770,8 @@ export default function PatientCaseDetail() {
   const pendingVerificationsCount = verifications?.filter((v: any) => v.status === 'pending').length || 0;
 
   const startWorkflowMutation = useMutation({
-    mutationFn: ({ workflowName, parameters }: { workflowName: string; parameters: any }) =>
-      api.startWorkflow(Number(id), workflowName, parameters),
+    mutationFn: ({ workflowName, parameters, scheduledAt }: { workflowName: string; parameters: any; scheduledAt?: string }) =>
+      api.startWorkflow(Number(id), workflowName, parameters, scheduledAt),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['patient-case-workflows', id] });
       queryClient.invalidateQueries({ queryKey: ['patient-case', id] });
@@ -863,8 +871,8 @@ export default function PatientCaseDetail() {
       {showWorkflowSelector && (
         <WorkflowSelector
           patientCaseId={Number(id)}
-          onStart={(workflowName, parameters) => {
-            startWorkflowMutation.mutate({ workflowName, parameters });
+          onStart={(workflowName, parameters, scheduledAt) => {
+            startWorkflowMutation.mutate({ workflowName, parameters, scheduledAt });
           }}
           onCancel={() => setShowWorkflowSelector(false)}
         />

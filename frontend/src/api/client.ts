@@ -26,10 +26,10 @@ export const api = {
   // Workflows
   getWorkflowCatalog: () => apiRequest<any[]>('/workflows/catalog'),
   getWorkflowSource: (workflowName: string) => apiRequest<{ workflowName: string; source: string }>(`/workflows/${workflowName}/source`),
-  startWorkflow: (patientCaseId: number, workflowName?: string, parameters?: any) =>
-    apiRequest<{ workflowId: string; runId: string; executionId: string }>('/workflows/start', {
+  startWorkflow: (patientCaseId: number, workflowName?: string, parameters?: any, scheduledAt?: string) =>
+    apiRequest<{ workflowId: string; runId?: string; executionId: string; scheduledAt?: string; status?: string }>('/workflows/start', {
       method: 'POST',
-      body: JSON.stringify({ patientCaseId, workflowName, parameters }),
+      body: JSON.stringify({ patientCaseId, workflowName, parameters, scheduledAt }),
     }),
   stopWorkflow: (workflowId: string) =>
     apiRequest<{ success: boolean }>(`/workflows/${workflowId}/stop`, {

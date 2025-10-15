@@ -15,6 +15,7 @@ export async function testSMSWorkflow(
 ): Promise<{ success: boolean }> {
   log.info('Test SMS workflow started', { patientCaseId, message: params.message });
 
+  await a.markWorkflowAsRunning();
   await a.sendSMS(patientCaseId, params.message);
 
   log.info('Test SMS workflow completed', { patientCaseId });
@@ -31,6 +32,7 @@ export async function testCallWorkflow(
 ): Promise<{ success: boolean; conversationId: string }> {
   log.info('Test call workflow started', { patientCaseId, params });
 
+  await a.markWorkflowAsRunning();
   const conversationId = await a.placeCall(patientCaseId);
 
   log.info('Test call workflow completed', { patientCaseId, conversationId });
@@ -46,6 +48,8 @@ export async function testFaxWorkflow(
   params: { faxNumber: string; message: string }
 ): Promise<{ success: boolean }> {
   log.info('Test fax workflow started', { patientCaseId, params });
+
+  await a.markWorkflowAsRunning();
 
   // Create a mock contact for fax testing
   const mockContact = {
@@ -68,6 +72,8 @@ export async function testEmailWorkflow(
   params: { to: string; subject: string; body: string }
 ): Promise<{ success: boolean }> {
   log.info('Test email workflow started', { patientCaseId, params });
+
+  await a.markWorkflowAsRunning();
 
   // Create a mock contact for email testing
   const mockContact = {

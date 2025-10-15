@@ -43,6 +43,9 @@ export async function recordsRetrievalWorkflow(
 ): Promise<RecordsRetrievalResult> {
   log.info('Starting records retrieval workflow', { patientCaseId, provider, params });
 
+  // Mark workflow as running (in case it was scheduled)
+  await a.markWorkflowAsRunning();
+
   // Set up pause/resume handlers
   setupPauseHandlers();
 

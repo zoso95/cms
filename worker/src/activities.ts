@@ -1246,6 +1246,27 @@ export async function logFailure(patientCaseId: number, reason: string): Promise
 // ============================================
 // Status Update Activities
 // ============================================
+
+/**
+ * Mark workflow as running (used when scheduled workflows begin execution)
+ */
+export async function markWorkflowAsRunning(): Promise<void> {
+  const info = Context.current().info;
+  const workflowId = info.workflowExecution.workflowId;
+
+  console.log(`[Activity] Marking workflow as running: ${workflowId}`);
+
+  // Update status to running if it was scheduled
+  await supabase
+    .from('workflow_executions')
+    .update({
+      status: 'running',
+      started_at: new Date().toISOString(),
+    })
+    .eq('workflow_id', workflowId)
+    .eq('status', 'scheduled');
+}
+
 export async function updateWorkflowStatus(statusMessage: string): Promise<void> {
   const info = Context.current().info;
   const workflowId = info.workflowExecution.workflowId;
