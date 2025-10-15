@@ -1,0 +1,109 @@
+# cd frontend && npm run build && cd ..  && npm run dev:frontend
+# docker-compose -f docker-compose.local.yml up --build -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL database for Temporal
+  temporal-postgres:
+    image: postgres:15-alpine
+    container_name: temporal-postgres-local
+    environment:
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_USER: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-postgres-data-local:/var/lib/postgresql/data
+    networks:
+      - cms-network-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Temporal server with auto-setup
+  temporal:
+    image: temporalio/auto-setup:1.23.0
+    container_name: temporal-local
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgres
+    ports:
+      - "7233:7233"
+    networks:
+      - cms-network-local
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Temporal UI
+  temporal-ui:
+    image: temporalio/ui:latest
+    container_name: temporal-ui-local
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=*
+    ports:
+      - "8233:8080"
+    networks:
+      - cms-network-local
+
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: backend-local
+    depends_on:
+      temporal:
+        condition: service_healthy
+    volumes:
+      # Mount existing .env file (not .env.production)
+      - ./backend/.env:/app/backend/.env:ro
+    environment:
+      # Override .env values for Docker networking
+      - TEMPORAL_ADDRESS=temporal:7233
+    ports:
+      - "3001:3001"
+    networks:
+      - cms-network-local
+
+  # Temporal Worker
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: worker-local
+    depends_on:
+      temporal:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    volumes:
+      # Mount existing .env file (not .env.production)
+      - ./worker/.env:/app/worker/.env:ro
+    environment:
+      # Override .env values for Docker networking
+      - TEMPORAL_ADDRESS=temporal:7233
+      - BACKEND_URL=http://backend:3001
+    networks:
+      - cms-network-local
+
+networks:
+  cms-network-local:
+    driver: bridge
+
+volumes:
+  temporal-postgres-data-local:

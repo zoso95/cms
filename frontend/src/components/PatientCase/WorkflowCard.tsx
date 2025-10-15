@@ -91,7 +91,7 @@ export default function WorkflowCard({
             </div>
           )}
           <a
-            href={`http://localhost:8233/namespaces/default/workflows/${workflow.workflow_id}/${workflow.run_id}`}
+            href={`${import.meta.env.VITE_TEMPORAL_UI_URL || 'http://localhost:8233'}/namespaces/default/workflows/${workflow.workflow_id}/${workflow.run_id}`}
             target="_blank"
             rel="noopener noreferrer"
             style={{

@@ -16,19 +16,16 @@ export function validateElevenLabsSignature(req: Request, res: Response, next: N
       return res.status(403).send('Missing signature header');
     }
 
-    // Use environment-specific webhook secret
-    const isDevelopment = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'dev';
-    const secret = isDevelopment
-      ? process.env.ELEVENLABS_WEBHOOK_SECRET_DEV
-      : process.env.ELEVENLABS_WEBHOOK_SECRET_PROD;
+    // Get webhook secret from environment
+    const secret = process.env.ELEVENLABS_WEBHOOK_SECRET;
 
     if (!secret) {
-      console.error(`❌ Missing webhook secret for ${isDevelopment ? 'development' : 'production'} environment`);
-      console.error(`   Set ELEVENLABS_WEBHOOK_SECRET_${isDevelopment ? 'DEV' : 'PROD'} in .env`);
+      console.error('❌ Missing ELEVENLABS_WEBHOOK_SECRET in environment');
+      console.error('   Set ELEVENLABS_WEBHOOK_SECRET in .env');
       return res.status(500).send('Webhook secret not configured');
     }
 
-    console.log(`🔐 Using ${isDevelopment ? 'development' : 'production'} webhook secret`);
+    console.log('🔐 Using ElevenLabs webhook secret');
 
     // Parse signature header
     const headers = signature.toString().split(',');
