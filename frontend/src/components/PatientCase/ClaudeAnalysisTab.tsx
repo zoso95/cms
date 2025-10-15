@@ -2,6 +2,78 @@ interface ClaudeAnalysisTabProps {
   analysis: any;
 }
 
+// Helper function to render JSON as structured tables
+function renderJsonAsTable(data: any, depth: number = 0): JSX.Element {
+  if (!data || typeof data !== 'object') {
+    return <span>{String(data)}</span>;
+  }
+
+  if (Array.isArray(data)) {
+    return (
+      <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
+        {data.map((item, index) => (
+          <li key={index} style={{ marginBottom: '0.25rem' }}>
+            {typeof item === 'object' ? renderJsonAsTable(item, depth + 1) : String(item)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  // Check if this is a flat object (all values are primitives)
+  const isFlat = Object.values(data).every(v =>
+    v === null || typeof v !== 'object' || Array.isArray(v)
+  );
+
+  if (isFlat && depth === 0) {
+    // Render as simple key-value table
+    return (
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '0.5rem' }}>
+        <tbody>
+          {Object.entries(data).map(([key, value]) => (
+            <tr key={key} style={{ borderBottom: '1px solid #e5e5e5' }}>
+              <td style={{
+                padding: '0.75rem',
+                fontWeight: '600',
+                width: '40%',
+                backgroundColor: '#f9fafb',
+                textTransform: 'capitalize'
+              }}>
+                {key.replace(/([A-Z])/g, ' $1').trim()}
+              </td>
+              <td style={{ padding: '0.75rem' }}>
+                {Array.isArray(value) ? renderJsonAsTable(value, depth + 1) : String(value || 'N/A')}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  }
+
+  // Render nested object as sections
+  return (
+    <div style={{ marginTop: depth > 0 ? '0.5rem' : '0' }}>
+      {Object.entries(data).map(([key, value]) => (
+        <div key={key} style={{ marginBottom: '1rem' }}>
+          <h4 style={{
+            fontSize: '0.875rem',
+            fontWeight: '600',
+            marginBottom: '0.5rem',
+            color: '#374151',
+            textTransform: 'capitalize'
+          }}>
+            {key.replace(/([A-Z])/g, ' $1').trim()}
+          </h4>
+          <div style={{ paddingLeft: depth > 0 ? '1rem' : '0' }}>
+            {renderJsonAsTable(value, depth + 1)}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) {
   return (
     <div style={{
@@ -95,16 +167,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Patient Information
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.patient_info, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.patient_info)}
               </div>
             </details>
           )}
@@ -124,16 +187,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Doctor Information Quality
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.doctor_info_quality, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.doctor_info_quality)}
               </div>
             </details>
           )}
@@ -153,16 +207,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Case Factors
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.case_factors, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.case_factors)}
               </div>
             </details>
           )}
@@ -182,16 +227,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Legal & Practical Factors
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.legal_practical_factors, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.legal_practical_factors)}
               </div>
             </details>
           )}
@@ -211,16 +247,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Call Quality Assessment
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.call_quality_assessment, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.call_quality_assessment)}
               </div>
             </details>
           )}
@@ -240,16 +267,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Next Actions
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.next_actions, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.next_actions)}
               </div>
             </details>
           )}
@@ -269,16 +287,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Compliance Notes
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.compliance_notes, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.compliance_notes)}
               </div>
             </details>
           )}
@@ -298,16 +307,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                 Overall Case Assessment
               </summary>
               <div style={{ padding: '1rem' }}>
-                <pre style={{
-                  backgroundColor: '#f9fafb',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  fontSize: '0.875rem',
-                  overflow: 'auto',
-                  whiteSpace: 'pre-wrap'
-                }}>
-                  {JSON.stringify(analysis.overall_case_assessment, null, 2)}
-                </pre>
+                {renderJsonAsTable(analysis.overall_case_assessment)}
               </div>
             </details>
           )}
