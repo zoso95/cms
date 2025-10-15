@@ -38,10 +38,10 @@ export async function approveVerification(req: Request, res: Response) {
       return res.status(400).json({ error: 'Either fax number or email is required' });
     }
 
-    // Get verification to find provider
+    // Get verification to find provider and patient case
     const { data: verification, error: verifyError } = await supabase
       .from('provider_verifications')
-      .select('provider_id')
+      .select('provider_id, patient_case_id')
       .eq('id', id)
       .single();
 
@@ -83,6 +83,49 @@ export async function approveVerification(req: Request, res: Response) {
         .from('providers')
         .update(updateData)
         .eq('id', verification.provider_id);
+    }
+
+    // Check if all verifications for this patient case are now approved
+    if (verification.patient_case_id) {
+      const { data: allVerifications, error: allVerifError } = await supabase
+        .from('provider_verifications')
+        .select('status')
+        .eq('patient_case_id', verification.patient_case_id);
+
+      if (!allVerifError && allVerifications) {
+        const allApproved = allVerifications.every(v => v.status === 'approved');
+
+        if (allApproved) {
+          // All providers verified! Update Task 5 to completed
+          console.log(`✅ All ${allVerifications.length} providers verified for case ${verification.patient_case_id}`);
+
+          await supabase
+            .from('case_tasks')
+            .update({
+              status: 'completed',
+              notes: `All ${allVerifications.length} provider(s) verified`,
+              updated_at: new Date().toISOString()
+            })
+            .eq('patient_case_id', verification.patient_case_id)
+            .eq('task_name', 'Verify Providers');
+        } else {
+          // Some still pending
+          const pending = allVerifications.filter(v => v.status === 'pending').length;
+          const approved = allVerifications.filter(v => v.status === 'approved').length;
+
+          console.log(`⏳ Provider verification progress: ${approved}/${allVerifications.length} approved, ${pending} pending`);
+
+          // Update task progress notes
+          await supabase
+            .from('case_tasks')
+            .update({
+              notes: `${approved}/${allVerifications.length} provider(s) verified`,
+              updated_at: new Date().toISOString()
+            })
+            .eq('patient_case_id', verification.patient_case_id)
+            .eq('task_name', 'Verify Providers');
+        }
+      }
     }
 
     // Send signal to workflow to continue
@@ -142,6 +185,15 @@ export async function rejectVerification(req: Request, res: Response) {
     const { id } = req.params;
     const { reason } = req.body;
 
+    // Get verification to find patient case
+    const { data: verification, error: verifyError } = await supabase
+      .from('provider_verifications')
+      .select('patient_case_id')
+      .eq('id', id)
+      .single();
+
+    if (verifyError) throw verifyError;
+
     const { error } = await supabase
       .from('provider_verifications')
       .update({
@@ -153,6 +205,31 @@ export async function rejectVerification(req: Request, res: Response) {
       .eq('id', id);
 
     if (error) throw error;
+
+    // Update task progress notes after rejection
+    if (verification.patient_case_id) {
+      const { data: allVerifications } = await supabase
+        .from('provider_verifications')
+        .select('status')
+        .eq('patient_case_id', verification.patient_case_id);
+
+      if (allVerifications) {
+        const approved = allVerifications.filter(v => v.status === 'approved').length;
+        const rejected = allVerifications.filter(v => v.status === 'rejected').length;
+        const pending = allVerifications.filter(v => v.status === 'pending').length;
+
+        console.log(`⏳ Provider verification progress: ${approved} approved, ${rejected} rejected, ${pending} pending`);
+
+        await supabase
+          .from('case_tasks')
+          .update({
+            notes: `${approved}/${allVerifications.length} verified, ${rejected} rejected, ${pending} pending`,
+            updated_at: new Date().toISOString()
+          })
+          .eq('patient_case_id', verification.patient_case_id)
+          .eq('task_name', 'Verify Providers');
+      }
+    }
 
     // Send signal to workflow to fail
     const { data: fullVerification } = await supabase
