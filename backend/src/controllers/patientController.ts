@@ -311,3 +311,44 @@ export async function initializePatientTasks(req: Request, res: Response) {
     res.status(500).json({ error: error.message });
   }
 }
+
+/**
+ * Update task status and assignment
+ */
+export async function updateTaskStatus(req: Request, res: Response) {
+  try {
+    const { taskId } = req.params;
+    const { status, notes, assigned_to } = req.body;
+
+    const validStatuses = ['not_started', 'in_progress', 'completed', 'blocked', 'failed'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+
+    const validAssignees = ['AI', 'Ben', 'Geoffrey', 'Andrew'];
+    if (assigned_to && !validAssignees.includes(assigned_to)) {
+      return res.status(400).json({ error: 'Invalid assignee' });
+    }
+
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (status) updateData.status = status;
+    if (notes !== undefined) updateData.notes = notes;
+    if (assigned_to) updateData.assigned_to = assigned_to;
+
+    const { data, error } = await supabase
+      .from('case_tasks')
+      .update(updateData)
+      .eq('id', taskId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}

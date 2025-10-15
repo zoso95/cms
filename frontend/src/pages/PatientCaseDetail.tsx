@@ -142,6 +142,22 @@ export default function PatientCaseDetail() {
     },
   });
 
+  const updateTaskStatusMutation = useMutation({
+    mutationFn: ({ taskId, status }: { taskId: string; status: string }) =>
+      api.updateTaskStatus(taskId, status),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['patient-case-tasks', id] });
+    },
+  });
+
+  const updateTaskAssigneeMutation = useMutation({
+    mutationFn: ({ taskId, assigned_to }: { taskId: string; assigned_to: string }) =>
+      api.updateTaskStatus(taskId, '', assigned_to),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['patient-case-tasks', id] });
+    },
+  });
+
   // WebSocket subscription for real-time updates
   useEffect(() => {
     if (!id) return;
@@ -209,6 +225,8 @@ export default function PatientCaseDetail() {
         tasks={tasks}
         onInitializeTasks={() => initializeTasksMutation.mutate()}
         isInitializing={initializeTasksMutation.isPending}
+        onUpdateTaskStatus={(taskId, status) => updateTaskStatusMutation.mutate({ taskId, status })}
+        onUpdateTaskAssignee={(taskId, assigned_to) => updateTaskAssigneeMutation.mutate({ taskId, assigned_to })}
       />
 
       <DetailsSection

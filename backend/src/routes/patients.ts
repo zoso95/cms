@@ -18,5 +18,6 @@ router.get('/:id/analysis', patientController.getPatientAnalysis);
 router.get('/:id/verifications', patientController.getPatientVerifications);
 router.get('/:id/tasks', patientController.getPatientTasks);
 router.post('/:id/tasks/initialize', patientController.initializePatientTasks);
+router.patch('/tasks/:taskId/status', patientController.updateTaskStatus);
 
 export default router;

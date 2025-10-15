@@ -2,6 +2,8 @@ interface TasksSectionProps {
   tasks: any[] | undefined;
   onInitializeTasks: () => void;
   isInitializing: boolean;
+  onUpdateTaskStatus: (taskId: string, status: string) => void;
+  onUpdateTaskAssignee: (taskId: string, assigned_to: string) => void;
 }
 
 function getTaskStatusColor(status: string) {
@@ -15,7 +17,17 @@ function getTaskStatusColor(status: string) {
   }
 }
 
-export default function TasksSection({ tasks, onInitializeTasks, isInitializing }: TasksSectionProps) {
+function getAssigneeColors(assignee: string) {
+  switch (assignee) {
+    case 'AI': return { bg: '#ede9fe', color: '#6b21a8' };
+    case 'Ben': return { bg: '#fef3c7', color: '#92400e' };
+    case 'Geoffrey': return { bg: '#dbeafe', color: '#1e40af' };
+    case 'Andrew': return { bg: '#d1fae5', color: '#065f46' };
+    default: return { bg: '#f3f4f6', color: '#374151' };
+  }
+}
+
+export default function TasksSection({ tasks, onInitializeTasks, isInitializing, onUpdateTaskStatus, onUpdateTaskAssignee }: TasksSectionProps) {
   return (
     <div style={{
       backgroundColor: '#fff',
@@ -76,36 +88,47 @@ export default function TasksSection({ tasks, onInitializeTasks, isInitializing 
                     </div>
                   </td>
                   <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>
-                    <span style={{
-                      padding: '0.25rem 0.5rem',
-                      borderRadius: '4px',
-                      fontSize: '0.75rem',
-                      backgroundColor: task.assigned_to === 'AI' ? '#ede9fe' : '#fef3c7',
-                      color: task.assigned_to === 'AI' ? '#6b21a8' : '#92400e'
-                    }}>
-                      {task.assigned_to}
-                    </span>
+                    <select
+                      value={task.assigned_to}
+                      onChange={(e) => onUpdateTaskAssignee(task.id, e.target.value)}
+                      style={{
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        border: 'none',
+                        backgroundColor: getAssigneeColors(task.assigned_to).bg,
+                        color: getAssigneeColors(task.assigned_to).color,
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="AI">AI</option>
+                      <option value="Ben">Ben</option>
+                      <option value="Geoffrey">Geoffrey</option>
+                      <option value="Andrew">Andrew</option>
+                    </select>
                   </td>
                   <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                      padding: '0.25rem 0.75rem',
-                      borderRadius: '9999px',
-                      fontSize: '0.75rem',
-                      fontWeight: '500',
-                      backgroundColor: getTaskStatusColor(task.status),
-                      color: '#fff'
-                    }}>
-                      {task.status === 'not_started' && '○'}
-                      {task.status === 'in_progress' && '◐'}
-                      {task.status === 'completed' && '●'}
-                      {task.status === 'blocked' && '⬤'}
-                      {task.status === 'failed' && '✖'}
-                      {' '}
-                      {task.status.replace('_', ' ')}
-                    </span>
+                    <select
+                      value={task.status}
+                      onChange={(e) => onUpdateTaskStatus(task.id, e.target.value)}
+                      style={{
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '9999px',
+                        fontSize: '0.75rem',
+                        fontWeight: '500',
+                        border: 'none',
+                        backgroundColor: getTaskStatusColor(task.status),
+                        color: '#fff',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="not_started">○ Not Started</option>
+                      <option value="in_progress">◐ In Progress</option>
+                      <option value="completed">● Completed</option>
+                      <option value="blocked">⬤ Blocked</option>
+                      <option value="failed">✖ Failed</option>
+                    </select>
                   </td>
                   <td style={{ padding: '0.75rem', fontSize: '0.75rem', color: '#666' }}>
                     {new Date(task.updated_at).toLocaleString()}

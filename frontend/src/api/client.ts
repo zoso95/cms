@@ -98,4 +98,9 @@ export const api = {
     apiRequest<{ success: boolean; tasks: any[] }>(`/patient-cases/${id}/tasks/initialize`, {
       method: 'POST',
     }),
+  updateTaskStatus: (taskId: string, status: string, assigned_to?: string) =>
+    apiRequest<any>(`/patient-cases/tasks/${taskId}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, assigned_to }),
+    }),
 };
