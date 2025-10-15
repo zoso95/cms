@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@afterimage/shared": "*",
+    "@supabase/supabase-js": "^2.75.0",
     "@tanstack/react-query": "^5.17.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

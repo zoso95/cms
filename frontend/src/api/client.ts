@@ -1,11 +1,24 @@
+import { supabase } from '../lib/supabase';
+
 const API_BASE_URL = '/api';
 
 export async function apiRequest<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  // Get current session token
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...options?.headers,
+  };
+
+  // Add auth token if available
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
     ...options,
   });
 
