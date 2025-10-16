@@ -50,7 +50,7 @@ const MAX_ATTEMPTS = 7;
 const WAIT_BETWEEN_ATTEMPTS = '1 day';
 // const WAIT_BETWEEN_ATTEMPTS = '5 minutes';
 const SMS_MESSAGES = [
-  "Hi! This is Check My Charts. We wanted to give you a follow up about the health care investigation that you left on our website. We'll give you a call in a few minutes.",
+  "Hi! This is Check My Charts. We wanted to give you a follow up about the healthcare investigation that you left on our website. We'll give you a call in a few minutes.",
   "Hi again! We'd love discuss your investigation with you. We'll call in a few minutes.",
   "Following up! We're ready to assist with you.",
   "Hey there! Just checking in about helping with your case. Can we connect?",

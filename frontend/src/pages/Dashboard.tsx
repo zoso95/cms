@@ -54,14 +54,32 @@ export default function Dashboard() {
     },
   });
 
+  const initializeTasksMutation = useMutation({
+    mutationFn: (patientCaseId: number) => api.initializePatientTasks(String(patientCaseId)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['patient-case-tasks', selectedPatientCaseId] });
+    },
+  });
+
+  // Fetch tasks for selected patient case
+  const { data: tasks } = useQuery({
+    queryKey: ['patient-case-tasks', selectedPatientCaseId],
+    queryFn: () => api.getPatientCaseTasks(String(selectedPatientCaseId)),
+    enabled: !!selectedPatientCaseId,
+  });
+
   const handlePatientSelect = (patientCaseId: number) => {
     setSelectedPatientCaseId(patientCaseId);
     setShowPatientSelector(false);
     setShowWorkflowSelector(true);
   };
 
-  const handleWorkflowStart = (workflowName: string, parameters: any, scheduledAt?: string) => {
+  const handleWorkflowStart = async (workflowName: string, parameters: any, scheduledAt?: string) => {
     if (selectedPatientCaseId) {
+      // Frontend hack: Initialize tasks if they don't exist
+      if (!tasks || tasks.length === 0) {
+        await initializeTasksMutation.mutateAsync(selectedPatientCaseId);
+      }
       startWorkflowMutation.mutate({ patientCaseId: selectedPatientCaseId, workflowName, parameters, scheduledAt });
     }
   };
