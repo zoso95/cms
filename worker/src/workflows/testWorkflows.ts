@@ -3,6 +3,12 @@ import type * as activities from '../activities';
 
 const a = proxyActivities<typeof activities>({
   startToCloseTimeout: '1 minute',
+  retry: {
+    maximumAttempts: 2, // Try once, then retry once = 2 total attempts (max 1 retry)
+    initialInterval: '10 seconds',
+    maximumInterval: '10 seconds',
+    backoffCoefficient: 1,
+  },
 });
 
 /**

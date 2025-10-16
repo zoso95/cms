@@ -408,13 +408,24 @@ export default function VerificationCard({
         >
           <h4 style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem', color: '#065f46' }}>Verified Contact Information</h4>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', fontSize: '0.875rem' }}>
+            {verification.verified_contact_info?.fullName && (
+              <div style={{ gridColumn: 'span 2' }}><strong>Full Name:</strong> {verification.verified_contact_info.fullName}</div>
+            )}
             {verification.verified_contact_info?.faxNumber && <div><strong>Fax:</strong> {verification.verified_contact_info.faxNumber}</div>}
             {verification.verified_contact_info?.email && <div><strong>Email:</strong> {verification.verified_contact_info.email}</div>}
-            {verification.verified_contact_info?.organization && <div><strong>Organization:</strong> {verification.verified_contact_info.organization}</div>}
+            {verification.verified_contact_info?.phoneNumber && <div><strong>Phone:</strong> {verification.verified_contact_info.phoneNumber}</div>}
             {verification.verified_contact_info?.npi && <div><strong>NPI:</strong> {verification.verified_contact_info.npi}</div>}
+            {verification.verified_contact_info?.organization && (
+              <div style={{ gridColumn: 'span 2' }}><strong>Organization:</strong> {verification.verified_contact_info.organization}</div>
+            )}
+            {verification.verified_contact_info?.specialty && (
+              <div style={{ gridColumn: 'span 2' }}><strong>Specialty:</strong> {verification.verified_contact_info.specialty}</div>
+            )}
             {verification.verified_contact_info?.address && (
               <div style={{ gridColumn: 'span 2' }}><strong>Address:</strong> {verification.verified_contact_info.address}</div>
             )}
+            {verification.verified_contact_info?.city && <div><strong>City:</strong> {verification.verified_contact_info.city}</div>}
+            {verification.verified_contact_info?.state && <div><strong>State:</strong> {verification.verified_contact_info.state}</div>}
           </div>
           <p style={{ fontSize: '0.75rem', color: '#065f46', marginTop: '0.75rem' }}>
             Verified by {verification.verified_by} on {new Date(verification.verified_at).toLocaleString()}

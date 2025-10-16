@@ -469,7 +469,6 @@ export async function placeProviderCall(
         failure_reason: callResult.error,
         completed_at: new Date().toISOString(),
         talked_to_human: false,
-        metadata: { provider_id: providerId, call_type: 'provider_followup' },
       });
 
     // Log failed communication
@@ -509,7 +508,6 @@ export async function placeProviderCall(
       to_number: normalizedPhone,
       agent_id: agentId,
       status: 'pending',
-      metadata: { provider_id: providerId, call_type: 'provider_followup' },
     });
 
   if (insertError) throw insertError;
