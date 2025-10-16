@@ -336,9 +336,19 @@ class OpenSignService {
       });
 
       if (createResponse.ok) {
-        const contact = await createResponse.json() as any;
-        console.log(`✅ [OPENSIGN] Contact created! ID: ${contact.objectId}`);
-        return contact;
+        const createResult = await createResponse.json() as any;
+        console.log(`✅ [OPENSIGN] Contact created! ID: ${createResult.objectId}`);
+
+        // Parse Server only returns objectId and createdAt, not the full object
+        // So we need to return the full contact object with all fields
+        return {
+          objectId: createResult.objectId,
+          Name: signerName,
+          Email: signerEmail,
+          Phone: '+1-555-0123',
+          Company: 'Patient',
+          JobTitle: 'Patient',
+        };
       } else {
         console.error('❌ [OPENSIGN] Failed to create contact:', await createResponse.json());
         return null;
