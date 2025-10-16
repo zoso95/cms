@@ -31,6 +31,13 @@ rsync -avz --exclude 'node_modules' \
   --exclude '.temporal' \
   --exclude '*.log' \
   ./ ubuntu@your-domain.com:~/cms/
+
+rsync -avz -e "ssh -i ../gnb-prompt.pem" \
+    --exclude 'node_modules' \
+    --exclude '.git' \
+    --exclude '.temporal' \
+    --exclude '*.log' \
+    ./ ubuntu@cms.quickchron.com:~/cms/
 ```
 
 ### Step 3: Restart Services

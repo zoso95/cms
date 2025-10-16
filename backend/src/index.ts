@@ -80,21 +80,6 @@ app.post(
   webhookController.handleOpenPhoneSMS
 );
 
-// Temporal UI assets (_app directory) - SESSION AUTH
-// These are static assets loaded by the Temporal UI SvelteKit app
-// Must be at root level (not under /api) for proper asset loading
-app.use('/_app', requireTemporalUIAuth, createProxyMiddleware({
-  target: process.env.TEMPORAL_UI_URL || 'http://localhost:8233',
-  changeOrigin: true,
-  onError: (err, req, res) => {
-    console.error('[Temporal UI Assets] Proxy error:', err);
-    (res as any).status(502).json({ error: 'Failed to load Temporal UI assets' });
-  },
-  onProxyReq: (proxyReq, req, res) => {
-    console.log(`[Temporal UI Assets] Proxying: ${req.method} ${req.path}`);
-  },
-}));
-
 // Socket.io connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
