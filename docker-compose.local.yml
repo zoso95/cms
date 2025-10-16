@@ -79,6 +79,7 @@ services:
       # Override .env values for Docker networking
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_UI_URL=http://temporal-ui:8080
+      - TZ=America/New_York
     ports:
       - "3001:3001"
     networks:
@@ -102,6 +103,7 @@ services:
       # Override .env values for Docker networking
       - TEMPORAL_ADDRESS=temporal:7233
       - BACKEND_URL=http://backend:3001
+      - TZ=America/New_York
     networks:
       - cms-network-local
 

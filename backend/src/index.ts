@@ -46,6 +46,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'temporal-ui-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
+  proxy: true, // Trust proxy when checking secure cookies
   cookie: {
     secure: process.env.NODE_ENV === 'production', // HTTPS only in production
     httpOnly: true,
@@ -72,6 +73,12 @@ app.post(
 
 // Apply JSON parsing to all other routes
 app.use(express.json());
+
+// OpenPhone SMS webhook
+app.post(
+  '/api/webhooks/openphone/sms',
+  webhookController.handleOpenPhoneSMS
+);
 
 // Temporal UI assets (_app directory) - SESSION AUTH
 // These are static assets loaded by the Temporal UI SvelteKit app

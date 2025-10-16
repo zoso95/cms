@@ -51,6 +51,9 @@ COPY worker/src ./worker/src
 
 WORKDIR /app/backend
 
+# Set timezone to America/New_York (EST/EDT)
+ENV TZ=America/New_York
+
 EXPOSE 3001
 
 CMD ["node", "dist/index.js"]

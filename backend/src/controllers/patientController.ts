@@ -2,6 +2,69 @@ import { Request, Response } from 'express';
 import { supabase } from '../db';
 
 /**
+ * Create a new patient case
+ */
+export async function createPatientCase(req: Request, res: Response) {
+  try {
+    const {
+      first_name,
+      last_name,
+      email,
+      phone,
+      birthday,
+      state,
+      condition,
+      incident_date,
+      impact,
+      details,
+      status,
+      priority,
+      case_type,
+      preexisting_conditions,
+      financial_damages,
+      standard_of_care_issues,
+      pain_and_suffering_damages,
+    } = req.body;
+
+    // Validate required fields
+    if (!first_name || !last_name) {
+      return res.status(400).json({ error: 'First name and last name are required' });
+    }
+
+    const { data, error } = await supabase
+      .from('patient_cases')
+      .insert({
+        first_name,
+        last_name,
+        email,
+        phone,
+        birthday,
+        state,
+        condition,
+        incident_date,
+        impact,
+        details,
+        status: status || 'new',
+        priority: priority || 0,
+        case_type,
+        preexisting_conditions,
+        financial_damages,
+        standard_of_care_issues,
+        pain_and_suffering_damages,
+        is_public_submission: false,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
  * Get all patient cases with pagination
  */
 export async function getAllPatientCases(req: Request, res: Response) {

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import PatientCaseSelector from '../components/PatientCaseSelector';
 import WorkflowSelector from '../components/WorkflowSelector';
+import { AddPatientModal } from '../components/AddPatientModal';
 import { getPriorityLabel, getPriorityColor, getStatusColor } from '../utils/patientHelpers';
 
 export default function Dashboard() {
@@ -11,6 +12,7 @@ export default function Dashboard() {
   const queryClient = useQueryClient();
   const [showPatientSelector, setShowPatientSelector] = useState(false);
   const [showWorkflowSelector, setShowWorkflowSelector] = useState(false);
+  const [showAddPatientModal, setShowAddPatientModal] = useState(false);
   const [selectedPatientCaseId, setSelectedPatientCaseId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
@@ -70,6 +72,12 @@ export default function Dashboard() {
     setSelectedPatientCaseId(null);
   };
 
+  const handlePatientCreated = () => {
+    // Invalidate queries to refresh the patient list
+    queryClient.invalidateQueries({ queryKey: ['patient-cases'] });
+    queryClient.invalidateQueries({ queryKey: ['patient-cases-with-workflows'] });
+  };
+
   if (isLoading) {
     return <div style={{ textAlign: 'center', padding: '3rem' }}>Loading patient cases...</div>;
   }
@@ -89,25 +97,46 @@ export default function Dashboard() {
           <h1 style={{ fontSize: '2rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Patient Cases with Workflows</h1>
           <p style={{ color: '#666' }}>Patients with active or completed workflows</p>
         </div>
-        <button
-          onClick={() => setShowPatientSelector(true)}
-          style={{
-            padding: '0.75rem 1.5rem',
-            borderRadius: '6px',
-            border: 'none',
-            backgroundColor: '#2563eb',
-            color: '#fff',
-            cursor: 'pointer',
-            fontSize: '0.875rem',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-          }}
-        >
-          <span style={{ fontSize: '1.25rem' }}>+</span>
-          Create New Workflow
-        </button>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <button
+            onClick={() => setShowAddPatientModal(true)}
+            style={{
+              padding: '0.75rem 1.5rem',
+              borderRadius: '6px',
+              border: '1px solid #2563eb',
+              backgroundColor: '#fff',
+              color: '#2563eb',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+          >
+            <span style={{ fontSize: '1.25rem' }}>+</span>
+            Add New Patient
+          </button>
+          <button
+            onClick={() => setShowPatientSelector(true)}
+            style={{
+              padding: '0.75rem 1.5rem',
+              borderRadius: '6px',
+              border: 'none',
+              backgroundColor: '#2563eb',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+          >
+            <span style={{ fontSize: '1.25rem' }}>+</span>
+            Create New Workflow
+          </button>
+        </div>
       </div>
 
       <div style={{
@@ -426,6 +455,13 @@ export default function Dashboard() {
           </div>
         </>
       )}
+
+      {/* Add Patient Modal */}
+      <AddPatientModal
+        isOpen={showAddPatientModal}
+        onClose={() => setShowAddPatientModal(false)}
+        onSuccess={handlePatientCreated}
+      />
 
       {/* Patient Case Selector Modal */}
       {showPatientSelector && (

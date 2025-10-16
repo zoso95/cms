@@ -42,6 +42,29 @@ export const api = {
   },
   getPatientCasesWithWorkflows: () => apiRequest<any[]>('/patient-cases-with-workflows'),
   getPatientCase: (id: string) => apiRequest<any>(`/patient-cases/${id}`),
+  createPatientCase: (patientData: {
+    first_name: string;
+    last_name: string;
+    email?: string;
+    phone?: string;
+    birthday?: string;
+    state?: string;
+    condition?: string;
+    incident_date?: string;
+    impact?: string;
+    details?: string;
+    status?: string;
+    priority?: number;
+    case_type?: string;
+    preexisting_conditions?: string;
+    financial_damages?: string;
+    standard_of_care_issues?: string;
+    pain_and_suffering_damages?: string;
+  }) =>
+    apiRequest<any>('/patient-cases', {
+      method: 'POST',
+      body: JSON.stringify(patientData),
+    }),
   updatePatientDetails: (id: string, details: string) =>
     apiRequest<any>(`/patient-cases/${id}/details`, {
       method: 'PATCH',

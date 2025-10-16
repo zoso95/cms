@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { supabase } from '../db';
 import { getTemporalClient } from '../temporal';
 import { v4 as uuidv4 } from 'uuid';
+import Anthropic from '@anthropic-ai/sdk';
 
 /**
  * Handle ElevenLabs conversation webhook
@@ -839,5 +840,312 @@ export async function handleElevenLabsInboundCall(req: Request, res: Response) {
         })
       }
     });
+  }
+}
+
+/**
+ * Handle OpenPhone SMS webhook
+ * Receives inbound SMS messages and generates AI responses using Claude
+ */
+export async function handleOpenPhoneSMS(req: Request, res: Response) {
+  try {
+    console.log('📱 [OPENPHONE WEBHOOK] Headers:', req.headers);
+    console.log('📱 [OPENPHONE WEBHOOK] Body:', req.body);
+
+    const webhookData = req.body;
+
+    // OpenPhone webhook format (v3 API):
+    // {
+    //   object: 'event',
+    //   type: 'message.received',
+    //   data: {
+    //     object: { id, from, to, direction, body, status, ... }
+    //   }
+    // }
+    if (webhookData.object === 'event' && webhookData.data?.object) {
+      const message = webhookData.data.object;
+      const eventType = webhookData.type;
+
+      console.log(`📥 [OPENPHONE] Event type: ${eventType}`);
+      console.log(`📥 [OPENPHONE] Message:`, {
+        id: message.id,
+        from: message.from,
+        to: message.to,
+        direction: message.direction,
+        status: message.status,
+        body: message.body?.substring(0, 50),
+      });
+
+      // Handle status updates for outbound messages
+      if (message.status && message.id) {
+        console.log(`📊 [OPENPHONE] Status update for ${message.id}: ${message.status}`);
+
+        // Update communication log status
+        await supabase
+          .from('communication_logs')
+          .update({
+            status: message.status === 'delivered' ? 'delivered' : message.status === 'failed' ? 'failed' : 'sent',
+            metadata: { openphone_status: message.status, message_id: message.id }
+          })
+          .eq('metadata->>message_id', message.id);
+      }
+
+      // Handle inbound messages - route to AI agent
+      if (message.direction === 'incoming' && message.from && message.body) {
+        console.log(`📥 [OPENPHONE] Inbound message from ${message.from}: "${message.body}"`);
+
+        // Look up patient case by phone number (multi-format)
+        const digitsOnly = message.from.replace(/\D/g, '');
+        const last10 = digitsOnly.slice(-10);
+
+        // Common phone number formats to try
+        const phoneFormats = [
+          message.from,                                                              // Original
+          `+1${last10}`,                                                            // E.164
+          `+${last10}`,                                                             // E.164 no country
+          last10,                                                                    // Just 10 digits
+          `1${last10}`,                                                             // 11 digits
+          `(${last10.slice(0, 3)}) ${last10.slice(3, 6)}-${last10.slice(6)}`,     // Formatted
+          `${last10.slice(0, 3)}-${last10.slice(3, 6)}-${last10.slice(6)}`,       // Dashed
+        ];
+
+        console.log(`🔍 Looking up patient case for phone: ${message.from}`);
+
+        const { data: patientCases, error: lookupError } = await supabase
+          .from('patient_cases')
+          .select('*')
+          .in('phone', phoneFormats)
+          .limit(1);
+
+        if (lookupError) {
+          console.error(`❌ Error looking up patient: ${lookupError.message}`);
+          return res.status(200).json({ received: true });
+        }
+
+        if (!patientCases || patientCases.length === 0) {
+          console.log(`⚠️  No patient case found for ${message.from}`);
+          return res.status(200).json({ received: true });
+        }
+
+        const patientCase = patientCases[0];
+        console.log(`✅ Found patient case: ${patientCase.first_name} ${patientCase.last_name} (ID: ${patientCase.id})`);
+
+        // Log the inbound message first
+        const inboundLogId = uuidv4();
+        const { error: inboundLogError } = await supabase
+          .from('communication_logs')
+          .insert({
+            id: inboundLogId,
+            patient_case_id: patientCase.id,
+            workflow_execution_id: null, // Inbound SMS don't have workflows
+            type: 'sms',
+            direction: 'inbound',
+            status: 'received',
+            content: message.body,
+            metadata: {
+              provider: 'openphone',
+              message_id: message.id,
+              from: message.from,
+              to: message.to,
+              conversation_id: message.conversationId,
+              phone_number_id: message.phoneNumberId,
+            },
+          });
+
+        if (inboundLogError) {
+          console.error(`❌ Failed to log inbound message:`, inboundLogError);
+        }
+
+        // Gather comprehensive context (similar to ElevenLabs)
+        console.log(`📊 Gathering comprehensive context for patient ${patientCase.id}...`);
+
+        // Fetch all related data
+        const [
+          { data: communications },
+          { data: providers },
+          { data: transcripts },
+          { data: workflowExecutions },
+          { data: analysis }
+        ] = await Promise.all([
+          supabase.from('communication_logs').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }),
+          supabase.from('providers').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }),
+          supabase.from('call_transcripts').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }),
+          supabase.from('workflow_executions').select('*').eq('patient_case_id', patientCase.id).order('started_at', { ascending: false }),
+          supabase.from('claude_case_analysis').select('*').eq('patient_case_id', patientCase.id).order('created_at', { ascending: false }).limit(1).maybeSingle()
+        ]);
+
+        // Get last 20 SMS messages for conversation history
+        const smsHistory = communications
+          ?.filter(c => c.type === 'sms')
+          .slice(0, 20)
+          .reverse() // Chronological order
+          .map(c => ({
+            role: c.direction === 'inbound' ? 'user' : 'assistant',
+            content: c.content,
+            timestamp: c.created_at
+          })) || [];
+
+        console.log(`📝 Found ${smsHistory.length} previous SMS messages`);
+
+        // Generate response using Claude
+        console.log(`🤖 Generating AI response using Claude...`);
+
+        // Initialize Anthropic client
+        const anthropic = new Anthropic({
+          apiKey: process.env.ANTHROPIC_API_KEY,
+        });
+
+        // Build conversation messages
+        const conversationMessages: any[] = [];
+
+        // Add previous SMS history
+        smsHistory.forEach((msg, index) => {
+          // Skip the last message if it's from the user (that's the current message)
+          if (index === smsHistory.length - 1 && msg.role === 'user') {
+            return;
+          }
+          conversationMessages.push({
+            role: msg.role,
+            content: msg.content
+          });
+        });
+
+        // Add current user message
+        conversationMessages.push({
+          role: 'user',
+          content: message.body
+        });
+
+        const systemPrompt = `You are a helpful medical case coordinator assistant responding to text messages from patients.
+
+Patient Information:
+- Name: ${patientCase.first_name} ${patientCase.last_name}
+- Status: ${patientCase.status}
+${patientCase.details ? `- Details: ${patientCase.details}` : ''}
+
+${analysis ? `
+Case Analysis:
+${analysis.summary}
+
+Medical Subject: ${analysis.medical_subject}
+
+Next Actions:
+${analysis.next_actions}
+` : ''}
+
+${providers && providers.length > 0 ? `
+Healthcare Providers (${providers.length}):
+${providers.map((p: any) => `- ${p.name} (${p.specialty}): ${p.phone_number}`).join('\n')}
+` : ''}
+
+Communication History:
+- Total Communications: ${communications?.length || 0}
+- Call Count: ${communications?.filter(c => c.type === 'call').length || 0}
+- SMS Count: ${communications?.filter(c => c.type === 'sms').length || 0}
+- Email Count: ${communications?.filter(c => c.type === 'email').length || 0}
+
+${transcripts && transcripts.length > 0 ? `
+Recent Call Transcripts:
+${transcripts.slice(0, 2).map((t: any) => t.transcript?.substring(0, 300)).join('\n\n')}
+` : ''}
+
+Your role:
+- Respond professionally and empathetically to the patient's text message
+- Keep responses concise (suitable for SMS - ideally under 160 characters, max 300 characters)
+- Use the context above to provide personalized, informed responses
+- If the patient asks about providers, appointments, or medical records, reference the available information
+- If you don't have information, be honest but helpful
+- Always maintain patient privacy and professionalism
+
+Respond to the patient's message now.`;
+
+        try {
+          const claudeResponse = await anthropic.messages.create({
+            model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+            max_tokens: 500,
+            system: systemPrompt,
+            messages: conversationMessages,
+          });
+
+          const responseText = claudeResponse.content[0].type === 'text'
+            ? claudeResponse.content[0].text
+            : 'I apologize, but I was unable to generate a response. Please try again.';
+
+          console.log(`✅ Generated response: "${responseText}"`);
+
+          // Send response via OpenPhone API
+          const openphoneApiKey = process.env.OPENPHONE_API_KEY;
+          if (!openphoneApiKey) {
+            console.error('❌ OPENPHONE_API_KEY not set in environment');
+            return res.status(200).json({ received: true });
+          }
+
+          const openphoneFromNumber = process.env.OPENPHONE_FROM_NUMBER;
+          if (!openphoneFromNumber) {
+            console.error('❌ OPENPHONE_FROM_NUMBER not set in environment');
+            return res.status(200).json({ received: true });
+          }
+
+          const openphoneResponse = await fetch('https://api.openphone.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Authorization': openphoneApiKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: openphoneFromNumber,
+              to: [message.from],
+              content: responseText,
+            }),
+          });
+
+          if (!openphoneResponse.ok) {
+            const errorText = await openphoneResponse.text();
+            console.error(`❌ Failed to send OpenPhone message: ${openphoneResponse.status} ${errorText}`);
+            return res.status(200).json({ received: true });
+          }
+
+          const sentMessage = await openphoneResponse.json();
+          console.log(`✅ Sent response via OpenPhone: message ID ${sentMessage.id || sentMessage.data?.id}`);
+
+          // Log the outbound response
+          const outboundLogId = uuidv4();
+          await supabase
+            .from('communication_logs')
+            .insert({
+              id: outboundLogId,
+              patient_case_id: patientCase.id,
+              workflow_execution_id: null,
+              type: 'sms',
+              direction: 'outbound',
+              status: 'sent',
+              content: responseText,
+              metadata: {
+                provider: 'openphone',
+                message_id: sentMessage.id || sentMessage.data?.id,
+                from: openphoneFromNumber,
+                to: message.from,
+                ai_generated: true,
+                claude_model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514',
+              },
+            });
+
+          console.log(`✅ Logged outbound AI response to communication_logs`);
+
+        } catch (error: any) {
+          console.error(`❌ Error generating or sending response:`, error);
+          // Continue - we still want to acknowledge the webhook
+        }
+      } else if (message.direction === 'outgoing' && message.to && message.body) {
+        // Log outbound messages (our replies sent manually or by other systems)
+        console.log(`📤 [OPENPHONE] Outgoing message to ${message.to}: "${message.body}"`);
+        // These are typically already logged when we send them, so we can skip
+      }
+    }
+
+    res.status(200).json({ received: true });
+  } catch (error: any) {
+    console.error('❌ [OPENPHONE] Error handling webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
   }
 }

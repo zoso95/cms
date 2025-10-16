@@ -16,8 +16,12 @@ import { supabase } from '../db';
 export async function requireTemporalUIAuth(req: Request, res: Response, next: NextFunction) {
   try {
     console.log('[Temporal UI Auth] Request:', req.method, req.path);
+    console.log('[Temporal UI Auth] Session ID:', req.sessionID);
     console.log('[Temporal UI Auth] Session authenticated:', (req.session as any)?.authenticated);
     console.log('[Temporal UI Auth] Has auth header:', !!req.headers.authorization);
+    console.log('[Temporal UI Auth] Cookies:', req.cookies);
+    console.log('[Temporal UI Auth] X-Forwarded-Proto:', req.get('X-Forwarded-Proto'));
+    console.log('[Temporal UI Auth] Protocol:', req.protocol);
 
     // Check if already authenticated via session
     if ((req.session as any)?.authenticated) {

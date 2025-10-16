@@ -45,4 +45,7 @@ COPY --from=builder /app/shared/package.json ./shared/
 
 WORKDIR /app/worker
 
+# Set timezone to America/New_York (EST/EDT)
+ENV TZ=America/New_York
+
 CMD ["node", "dist/worker.js"]
