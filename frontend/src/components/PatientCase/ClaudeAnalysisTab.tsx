@@ -2,6 +2,16 @@ interface ClaudeAnalysisTabProps {
   analysis: any;
 }
 
+// Helper function to convert camelCase to Title Case
+function toTitleCase(str: string): string {
+  return str
+    .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+    .trim() // Remove leading/trailing spaces
+    .split(' ') // Split into words
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()) // Capitalize each word
+    .join(' '); // Join back together
+}
+
 // Helper function to render JSON as structured tables
 function renderJsonAsTable(data: any, depth: number = 0): JSX.Element {
   if (!data || typeof data !== 'object') {
@@ -36,10 +46,9 @@ function renderJsonAsTable(data: any, depth: number = 0): JSX.Element {
                 padding: '0.75rem',
                 fontWeight: '600',
                 width: '40%',
-                backgroundColor: '#f9fafb',
-                textTransform: 'capitalize'
+                backgroundColor: '#f9fafb'
               }}>
-                {key.replace(/([A-Z])/g, ' $1').trim()}
+                {toTitleCase(key)}
               </td>
               <td style={{ padding: '0.75rem' }}>
                 {Array.isArray(value) ? renderJsonAsTable(value, depth + 1) : String(value || 'N/A')}
@@ -60,10 +69,9 @@ function renderJsonAsTable(data: any, depth: number = 0): JSX.Element {
             fontSize: '0.875rem',
             fontWeight: '600',
             marginBottom: '0.5rem',
-            color: '#374151',
-            textTransform: 'capitalize'
+            color: '#374151'
           }}>
-            {key.replace(/([A-Z])/g, ' $1').trim()}
+            {toTitleCase(key)}
           </h4>
           <div style={{ paddingLeft: depth > 0 ? '1rem' : '0' }}>
             {renderJsonAsTable(value, depth + 1)}
@@ -135,7 +143,7 @@ export default function ClaudeAnalysisTab({ analysis }: ClaudeAnalysisTabProps) 
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                       <strong style={{ fontSize: '0.875rem' }}>
-                        {key.replace(/([A-Z])/g, ' $1').trim()}
+                        {toTitleCase(key)}
                       </strong>
                       <span style={{
                         fontSize: '1rem',

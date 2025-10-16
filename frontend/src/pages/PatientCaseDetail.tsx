@@ -204,7 +204,11 @@ export default function PatientCaseDetail() {
       {showWorkflowSelector && (
         <WorkflowSelector
           patientCaseId={Number(id)}
-          onStart={(workflowName, parameters, scheduledAt) => {
+          onStart={async (workflowName, parameters, scheduledAt) => {
+            // Frontend hack: Initialize tasks if they don't exist
+            if (!tasks || tasks.length === 0) {
+              await initializeTasksMutation.mutateAsync();
+            }
             startWorkflowMutation.mutate({ workflowName, parameters, scheduledAt });
           }}
           onCancel={() => setShowWorkflowSelector(false)}

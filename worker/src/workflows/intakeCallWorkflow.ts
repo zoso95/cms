@@ -1,6 +1,7 @@
-import { proxyActivities, sleep, condition, defineSignal, setHandler, log } from '@temporalio/workflow';
+import { proxyActivities, sleep, condition, defineSignal, setHandler, log, executeChild } from '@temporalio/workflow';
 import type * as activities from '../activities';
 import { setupPauseHandlers, checkPaused } from '../utils/pauseResume';
+import { recordsRetrievalWorkflow, verificationCompleteSignal } from './recordsRetrievalWorkflow';
 
 // Regular activities (no retry)
 const a = proxyActivities<typeof activities>({
@@ -49,8 +50,8 @@ const MAX_ATTEMPTS = 7;
 const WAIT_BETWEEN_ATTEMPTS = '1 day';
 // const WAIT_BETWEEN_ATTEMPTS = '5 minutes';
 const SMS_MESSAGES = [
-  "Hi! This is Check My Charts. We wanted to give you a follow up about your case that you left on our website. We'll give you a call in a few minutes.",
-  "Hi again! We'd love discuss your case with you. We'll call in a few minutes.",
+  "Hi! This is Check My Charts. We wanted to give you a follow up about the health care investigation that you left on our website. We'll give you a call in a few minutes.",
+  "Hi again! We'd love discuss your investigation with you. We'll call in a few minutes.",
   "Following up! We're ready to assist with you.",
   "Hey there! Just checking in about helping with your case. Can we connect?",
   "Hi! We're still here to help with your medical case. We'll try calling in a few minutes.",
@@ -117,7 +118,7 @@ export async function intakeCallWorkflow(
 
     // Wait 1 minute before calling to give patient time to see the SMS
     await a.updateWorkflowStatus(`Day ${dayNumber}: Waiting 5 minute before call`);
-    await sleep('5 minutes');
+    await sleep('1 minute');
 
     // Check pause state before making call
     await checkPaused();

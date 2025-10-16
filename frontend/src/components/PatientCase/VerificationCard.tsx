@@ -12,6 +12,7 @@ export default function VerificationCard({
   rejectVerificationMutation,
 }: VerificationCardProps) {
   const [formData, setFormData] = useState({
+    fullName: verification.provider?.full_name || verification.provider?.name || '',
     faxNumber: verification.npi_lookup_results?.provider?.faxNumber || '',
     email: verification.npi_lookup_results?.provider?.email || '',
     organization: verification.npi_lookup_results?.provider?.organization || verification.extracted_provider_info?.organization || '',
@@ -190,6 +191,21 @@ export default function VerificationCard({
           <h4 style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem', color: '#1e40af' }}>Verify Contact Information</h4>
           <p style={{ fontSize: '0.75rem', color: '#666', marginBottom: '1rem' }}>* At least one contact method (fax or email) is required</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
+            <div style={{ gridColumn: 'span 2' }}>
+              <label style={{ fontSize: '0.75rem', fontWeight: '500', display: 'block', marginBottom: '0.25rem' }}>Full Name</label>
+              <input
+                type="text"
+                value={formData.fullName}
+                onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  fontSize: '0.875rem',
+                }}
+              />
+            </div>
             <div>
               <label style={{ fontSize: '0.75rem', fontWeight: '500', display: 'block', marginBottom: '0.25rem' }}>Fax Number</label>
               <input

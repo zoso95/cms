@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 
@@ -9,24 +9,25 @@ interface PatientCaseSelectorProps {
 
 export default function PatientCaseSelector({ onSelect, onCancel }: PatientCaseSelectorProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState('');
   const [page, setPage] = useState(1);
   const limit = 50;
 
-  // Debounce search query to avoid too many API calls
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
-      setPage(1); // Reset to first page when search changes
-    }, 300);
+  const handleSearch = () => {
+    setSubmittedSearch(searchQuery);
+    setPage(1); // Reset to first page when search changes
+  };
 
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
+  };
 
   // Use server-side search
   const { data: patientCasesResponse, isLoading } = useQuery({
-    queryKey: ['patient-cases-selector', page, debouncedSearch],
-    queryFn: () => api.getPatientCases(page, limit, debouncedSearch || undefined),
+    queryKey: ['patient-cases-selector', page, submittedSearch],
+    queryFn: () => api.getPatientCases(page, limit, submittedSearch || undefined),
   });
 
   const patientCases = patientCasesResponse?.data || [];
@@ -100,29 +101,80 @@ export default function PatientCaseSelector({ onSelect, onCancel }: PatientCaseS
 
         {/* Search Bar */}
         <div style={{ marginBottom: '1.5rem' }}>
-          <input
-            type="text"
-            placeholder="Search by name, phone, condition, or ID..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            autoFocus
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              border: '1px solid #e5e5e5',
-              borderRadius: '6px',
-              fontSize: '0.875rem',
-              outline: 'none',
-            }}
-            onFocus={(e) => {
-              e.target.style.borderColor = '#2563eb';
-              e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1)';
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = '#e5e5e5';
-              e.target.style.boxShadow = 'none';
-            }}
-          />
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              type="text"
+              placeholder="Search by name, phone, condition, or ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyPress={handleKeyPress}
+              autoFocus
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                border: '1px solid #e5e5e5',
+                borderRadius: '6px',
+                fontSize: '0.875rem',
+                outline: 'none',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#2563eb';
+                e.target.style.boxShadow = '0 0 0 3px rgba(37, 99, 235, 0.1)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = '#e5e5e5';
+                e.target.style.boxShadow = 'none';
+              }}
+            />
+            <button
+              onClick={handleSearch}
+              style={{
+                padding: '0.75rem 1.5rem',
+                borderRadius: '6px',
+                border: 'none',
+                backgroundColor: '#2563eb',
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                fontWeight: '500',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#1d4ed8';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#2563eb';
+              }}
+            >
+              Search
+            </button>
+            {submittedSearch && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setSubmittedSearch('');
+                  setPage(1);
+                }}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '6px',
+                  border: '1px solid #e5e5e5',
+                  backgroundColor: '#fff',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = '#f9fafb';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#fff';
+                }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
           {pagination && (
             <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.5rem' }}>
               Showing {patientCases.length} of {pagination.total} patients
@@ -170,7 +222,7 @@ export default function PatientCaseSelector({ onSelect, onCancel }: PatientCaseS
               {!isLoading && patientCases.length === 0 && (
                 <tr>
                   <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#666', fontSize: '0.875rem' }}>
-                    {searchQuery ? `No patient cases found matching "${searchQuery}"` : 'No patient cases found'}
+                    {submittedSearch ? `No patient cases found matching "${submittedSearch}"` : 'No patient cases found'}
                   </td>
                 </tr>
               )}

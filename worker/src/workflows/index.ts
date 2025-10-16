@@ -4,5 +4,6 @@ export { recordsRetrievalWorkflow } from './recordsRetrievalWorkflow';
 export { intakeCallWorkflow } from './intakeCallWorkflow';
 export { recordsCoordinatorWorkflow } from './recordsCoordinatorWorkflow';
 export { providerRecordsWorkflow } from './providerRecordsWorkflow';
+export { productionEndToEndWorkflow } from './productionEndToEndWorkflow';
 export * from './testWorkflows';
 export * from './registry';

@@ -612,6 +612,52 @@ export async function getVerifiedProvider(providerId: string): Promise<any | nul
   return data;
 }
 
+/**
+ * Get all providers for a patient case (verified and unverified)
+ * @param patientCaseId - Patient case ID
+ * @returns Array of all providers
+ */
+export async function getPatientCaseProviders(patientCaseId: number): Promise<any[]> {
+  console.log(`[Activity] Getting all providers for patient case ${patientCaseId}`);
+
+  const { data, error } = await supabase
+    .from('providers')
+    .select('*')
+    .eq('patient_case_id', patientCaseId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error(`[Activity] Error fetching providers:`, error);
+    throw error;
+  }
+
+  console.log(`[Activity] Found ${data?.length || 0} providers`);
+  return data || [];
+}
+
+/**
+ * Get all verifications for a patient case
+ * @param patientCaseId - Patient case ID
+ * @returns Array of verifications
+ */
+export async function getPatientCaseVerifications(patientCaseId: number): Promise<any[]> {
+  console.log(`[Activity] Getting verifications for patient case ${patientCaseId}`);
+
+  const { data, error } = await supabase
+    .from('provider_verifications')
+    .select('*')
+    .eq('patient_case_id', patientCaseId)
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error(`[Activity] Error fetching verifications:`, error);
+    throw error;
+  }
+
+  console.log(`[Activity] Found ${data?.length || 0} verifications`);
+  return data || [];
+}
+
 // ============================================
 // E-Signature Activities (OpenSign)
 // ============================================

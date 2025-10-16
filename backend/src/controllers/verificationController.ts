@@ -71,6 +71,7 @@ export async function approveVerification(req: Request, res: Response) {
       };
       if (faxNumber) updateData.fax_number = faxNumber;
       if (email) updateData.contact_info = email;
+      if (otherContactInfo.fullName) updateData.full_name = otherContactInfo.fullName;
       if (otherContactInfo.organization) updateData.organization = otherContactInfo.organization;
       if (otherContactInfo.specialty) updateData.specialty = otherContactInfo.specialty;
       if (otherContactInfo.address) updateData.address = otherContactInfo.address;

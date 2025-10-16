@@ -168,6 +168,14 @@ export const WORKFLOW_REGISTRY: Record<string, WorkflowMetadata> = {
     }),
     defaultParams: { providerId: '', providerName: '' },
   },
+  productionEndToEndWorkflow: {
+    name: 'productionEndToEndWorkflow',
+    displayName: 'Production End-to-End (Complete)',
+    description: 'Complete production workflow with full task tracking. Includes: intake call (7-day outreach), case evaluation, provider extraction, manual verification with signals, signature collection, and records requests. Updates all 8 tasks throughout the process.',
+    category: 'production',
+    parameters: z.object({}),
+    defaultParams: {},
+  },
 };
 
 // Helper to get workflow metadata
