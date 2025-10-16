@@ -38,6 +38,10 @@ export async function productionEndToEndWorkflow(
 
   await a.updateWorkflowStatus('Starting intake call workflow');
 
+  // Get this workflow's execution ID to pass to child workflow for signal routing
+  const parentExecutionId = await a.getParentWorkflowExecutionId();
+  log.info('Parent workflow execution ID', { parentExecutionId });
+
   // ============================================
   // PHASE 1: Run Intake Call Workflow (Tasks 1-5)
   // ============================================
@@ -51,7 +55,7 @@ export async function productionEndToEndWorkflow(
 
   const intakeResult = await executeChild(intakeCallWorkflow, {
     workflowId: intakeWorkflowId,
-    args: [patientCaseId],
+    args: [patientCaseId, parentExecutionId],
   });
 
   log.info('Intake call workflow completed', { patientCaseId, intakeResult });

@@ -939,7 +939,8 @@ export async function createRecordsRequest(
 
 export async function findDoctorOffice(
   patientCaseId: number,
-  providerName: string
+  providerName: string,
+  parentWorkflowExecutionId?: string
 ): Promise<{
   name: string;
   method: 'email' | 'fax';
@@ -984,7 +985,15 @@ export async function findDoctorOffice(
 
   // Create verification request
   const verificationId = uuidv4();
-  const workflowExecutionId = await getWorkflowExecutionIdFromDb(patientCaseId);
+
+  // Use parent workflow execution ID if provided (for signal routing), otherwise use current workflow
+  const workflowExecutionId = parentWorkflowExecutionId || await getWorkflowExecutionIdFromDb(patientCaseId);
+
+  if (parentWorkflowExecutionId) {
+    console.log(`[Activity] Using parent workflow execution ID for verification: ${parentWorkflowExecutionId}`);
+  } else {
+    console.log(`[Activity] Using current workflow execution ID for verification: ${workflowExecutionId}`);
+  }
 
   // Get call transcript ID if available
   const { data: callTranscript } = await supabase
@@ -1438,6 +1447,31 @@ export async function getTaskByName(
 // ============================================
 // Status Update Activities
 // ============================================
+
+/**
+ * Get the current workflow's execution ID from the database
+ * This is useful for passing to child workflows for signal routing
+ */
+export async function getParentWorkflowExecutionId(): Promise<string> {
+  const info = Context.current().info;
+  const workflowId = info.workflowExecution.workflowId;
+
+  console.log(`[Activity] Getting workflow execution ID for workflow: ${workflowId}`);
+
+  const { data, error } = await supabase
+    .from('workflow_executions')
+    .select('id')
+    .eq('workflow_id', workflowId)
+    .single();
+
+  if (error || !data) {
+    console.error(`[Activity] Failed to find workflow execution for workflow_id: ${workflowId}`, error);
+    throw new Error(`No workflow execution found for workflow ${workflowId}`);
+  }
+
+  console.log(`[Activity] Found execution ID: ${data.id}`);
+  return data.id;
+}
 
 /**
  * Mark workflow as running (used when scheduled workflows begin execution)

@@ -65,9 +65,13 @@ const SMS_MESSAGES = [
  * Hardcoded for 1 week of daily outreach (7 attempts).
  * Handles initial patient contact, intake call, and case evaluation.
  * Updates Tasks 1 (Intake Call) and 2 (Case Evaluation) throughout the process.
+ *
+ * @param patientCaseId - Patient case ID
+ * @param parentWorkflowExecutionId - Optional parent workflow execution ID for signal routing
  */
 export async function intakeCallWorkflow(
-  patientCaseId: number
+  patientCaseId: number,
+  parentWorkflowExecutionId?: string
 ): Promise<IntakeCallResult> {
   log.info('Starting intake call workflow', { patientCaseId, maxAttempts: MAX_ATTEMPTS });
 
@@ -252,7 +256,7 @@ export async function intakeCallWorkflow(
         await a.updateWorkflowStatus(`Task 5: Looking up ${provider.fullName}`);
 
         try {
-          const contact = await a.findDoctorOffice(patientCaseId, provider.fullName);
+          const contact = await a.findDoctorOffice(patientCaseId, provider.fullName, parentWorkflowExecutionId);
           log.info('Provider lookup complete', { patientCaseId, provider: provider.fullName, contact });
 
           if (contact.verificationRequired) {
