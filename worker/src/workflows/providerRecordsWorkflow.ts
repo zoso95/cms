@@ -57,7 +57,7 @@ export async function providerRecordsWorkflow(
   // Current approach: Check frequently for first 30 min (for demo), then slow down
   // Better approach: Use OpenSign webhook or Temporal signals to notify when signed
 
-  const fastPollingAttempts = 10; // 10 attempts × 3 min = 30 minutes
+  const fastPollingAttempts = 20; // 10 attempts × 3 min = 30 minutes
   const slowPollingAttempts = 60; // 60 attempts × 12 hours = 30 days
   const maxSignatureAttempts = fastPollingAttempts + slowPollingAttempts;
 
@@ -75,7 +75,7 @@ export async function providerRecordsWorkflow(
     if (!signatureDone) {
       // Fast polling for first 30 minutes (for demo), then slow polling
       if (signatureAttempts < fastPollingAttempts) {
-        await sleep('3 minutes'); // Fast: check every 3 minutes for first 30 min
+        await sleep('2 minutes'); // Fast: check every 3 minutes for first 30 min
       } else {
         await sleep('12 hours'); // Slow: check every 12 hours after 30 min
       }
@@ -137,6 +137,32 @@ export async function providerRecordsWorkflow(
     const messageId = await longActivities.sendRecordsEmail(patientCaseId, contact, requestId);
     log.info('Email sent successfully', { patientCaseId, providerName, messageId });
     await a.updateWorkflowStatus(`Email sent - ${providerName}`);
+  }
+
+  // Step 5: Call the provider's office (if they have a phone number)
+  await checkPaused();
+  if (providerInfo.phone_number) {
+    log.info('Provider has phone number - placing follow-up call', { patientCaseId, providerId, providerName, phone: providerInfo.phone_number });
+    await a.updateWorkflowStatus(`Calling provider office - ${providerName}`);
+
+    try {
+      const conversationId = await longActivities.placeProviderCall(patientCaseId, providerId);
+      log.info('Provider call initiated successfully', { patientCaseId, providerName, conversationId });
+      await a.updateWorkflowStatus(`Provider call initiated - ${providerName}`);
+
+      // Note: We don't wait for the call to complete - it's fire-and-forget
+      // The call result will be logged via webhook independently
+    } catch (error: any) {
+      // Log error but don't fail the workflow - the fax/email was already sent successfully
+      log.warn('Provider call failed but continuing workflow', {
+        patientCaseId,
+        providerName,
+        error: error.message,
+      });
+      await a.updateWorkflowStatus(`Provider call failed (continuing) - ${providerName}`);
+    }
+  } else {
+    log.info('Provider has no phone number - skipping call', { patientCaseId, providerId, providerName });
   }
 
   log.info('Provider records workflow completed', { patientCaseId, providerName });

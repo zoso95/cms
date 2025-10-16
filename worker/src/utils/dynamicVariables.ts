@@ -140,3 +140,102 @@ export async function buildDynamicVariables(
 
   return variables;
 }
+
+/**
+ * Build dynamic variables for calling a provider's office
+ *
+ * This is used when calling a doctor's office to follow up on medical records requests
+ */
+export async function buildProviderCallDynamicVariables(
+  patientCaseId: number,
+  providerId: string,
+  workflowId: string
+): Promise<Record<string, string | number | boolean>> {
+  console.log(`[ProviderCallVariables] Building for patient ${patientCaseId}, provider ${providerId}`);
+
+  // Fetch patient case
+  const { data: patientCase, error: caseError } = await supabase
+    .from('patient_cases')
+    .select('*')
+    .eq('id', patientCaseId)
+    .single();
+
+  if (caseError || !patientCase) {
+    throw new Error(`Failed to fetch patient case: ${caseError?.message}`);
+  }
+
+  // Fetch provider details
+  const { data: provider, error: providerError } = await supabase
+    .from('providers')
+    .select('*')
+    .eq('id', providerId)
+    .single();
+
+  if (providerError || !provider) {
+    throw new Error(`Failed to fetch provider: ${providerError?.message}`);
+  }
+
+  // Build flat variables for easy access in agent prompts
+  const variables: Record<string, string | number | boolean> = {
+    // Patient info (for the agent to reference)
+    patient_case_id: patientCaseId.toString(),
+    patient_first_name: patientCase.first_name || '',
+    patient_last_name: patientCase.last_name || '',
+    patient_full_name: `${patientCase.first_name || ''} ${patientCase.last_name || ''}`.trim(),
+    patient_phone: patientCase.phone || '',
+    patient_email: patientCase.email || '',
+
+    // Provider info (who we're calling)
+    provider_id: providerId,
+    provider_name: provider.full_name || provider.name || '',
+    provider_first_name: provider.first_name || '',
+    provider_last_name: provider.last_name || '',
+    provider_organization: provider.organization || '',
+    provider_specialty: provider.specialty || '',
+    provider_phone: provider.phone_number || '',
+    provider_fax: provider.fax_number || '',
+    provider_address: provider.address || '',
+    provider_city: provider.city || '',
+    provider_state: provider.state || '',
+    provider_npi: provider.npi || '',
+
+    // Workflow info
+    workflow_id: workflowId,
+
+    // Call purpose
+    call_purpose: 'medical_records_followup',
+    records_request_sent: true,
+  };
+
+  // Build comprehensive context
+  const context = {
+    patient: patientCase,
+    provider: provider,
+    purpose: 'Follow up on medical records authorization that was sent via fax/email',
+    workflow_id: workflowId,
+    metadata: {
+      generated_at: new Date().toISOString(),
+      patient_case_id: patientCaseId,
+      provider_id: providerId,
+    },
+  };
+
+  // Add stringified context
+  variables.context = JSON.stringify(context);
+
+  // Validate primitive types
+  for (const [key, value] of Object.entries(variables)) {
+    const type = typeof value;
+    if (type !== 'string' && type !== 'number' && type !== 'boolean') {
+      throw new Error(
+        `Invalid dynamic variable type: ${key} is ${type}, but ElevenLabs only accepts string, number, or boolean`
+      );
+    }
+  }
+
+  console.log(`[ProviderCallVariables] Built ${Object.keys(variables).length} variables`);
+  console.log(`[ProviderCallVariables] Calling: ${variables.provider_name} at ${variables.provider_organization}`);
+  console.log(`[ProviderCallVariables] ✅ All variables are primitive types`);
+
+  return variables;
+}

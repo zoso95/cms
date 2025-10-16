@@ -6,7 +6,7 @@ import nodemailer from 'nodemailer';
 import { openphone } from './services/openphone';
 import { elevenlabs } from './services/elevenlabs';
 import { normalizePhoneNumber } from './utils/phone';
-import { buildDynamicVariables } from './utils/dynamicVariables';
+import { buildDynamicVariables, buildProviderCallDynamicVariables } from './utils/dynamicVariables';
 import { registerWorkflow, type RegisterWorkflowParams } from './utils/workflowRegistry';
 import { claude } from './services/claude';
 import { openSignService } from './services/opensign';
@@ -395,6 +395,144 @@ export async function scheduleCall(patientCaseId: number, message: string): Prom
     'received',
     `Patient requested callback: ${message}`
   );
+}
+
+/**
+ * Place a call to a provider's office to follow up on medical records request
+ * @param patientCaseId - Patient case ID
+ * @param providerId - Provider ID
+ * @returns ElevenLabs conversation ID
+ */
+export async function placeProviderCall(
+  patientCaseId: number,
+  providerId: string
+): Promise<string> {
+  console.log(`[Activity] Placing call to provider ${providerId} for patient case ${patientCaseId}`);
+
+  // Get provider details from database
+  const { data: provider, error: providerError } = await supabase
+    .from('providers')
+    .select('*')
+    .eq('id', providerId)
+    .single();
+
+  if (providerError) throw providerError;
+  if (!provider) throw new Error(`Provider ${providerId} not found`);
+  if (!provider.phone_number) {
+    console.log(`[Activity] Provider ${provider.full_name || provider.name} has no phone number - skipping call`);
+    throw new Error(`Provider ${provider.full_name || provider.name} has no phone number`);
+  }
+
+  // Get workflow execution context
+  const info = Context.current().info;
+  const workflowId = info.workflowExecution.workflowId;
+
+  // Normalize phone number
+  const normalizedPhone = normalizePhoneNumber(provider.phone_number);
+  console.log(`[Activity] Normalized provider phone: ${provider.phone_number} → ${normalizedPhone}`);
+
+  // Get provider-specific agent ID from environment (or fallback to default)
+  const agentId = process.env.ELEVENLABS_PROVIDER_AGENT_ID || process.env.ELEVENLABS_AGENT_ID;
+  if (!agentId) {
+    throw new Error('ELEVENLABS_PROVIDER_AGENT_ID or ELEVENLABS_AGENT_ID not configured');
+  }
+
+  // Build dynamic variables with provider and patient context
+  console.log(`[Activity] Building provider call dynamic variables...`);
+  const dynamicVariables = await buildProviderCallDynamicVariables(patientCaseId, providerId, workflowId);
+  console.log(`[Activity] Built ${Object.keys(dynamicVariables).length} dynamic variables`);
+
+  // Initiate call via ElevenLabs
+  console.log(`[Activity] Initiating ElevenLabs call to provider at ${normalizedPhone}...`);
+  const callResult = await elevenlabs.makeCall({
+    toNumber: normalizedPhone,
+    agentId,
+    dynamicVariables,
+  });
+
+  if (!callResult.success) {
+    console.error(`[Activity] Provider call initiation failed: ${callResult.error}`);
+
+    // Store failed call record
+    const callId = uuidv4();
+    await supabase
+      .from('elevenlabs_calls')
+      .insert({
+        id: callId,
+        patient_case_id: patientCaseId,
+        workflow_id: workflowId,
+        conversation_id: null,
+        call_sid: null,
+        to_number: normalizedPhone,
+        agent_id: agentId,
+        status: 'failed',
+        failure_reason: callResult.error,
+        completed_at: new Date().toISOString(),
+        talked_to_human: false,
+        metadata: { provider_id: providerId, call_type: 'provider_followup' },
+      });
+
+    // Log failed communication
+    await logCommunication(
+      patientCaseId,
+      'call',
+      'outbound',
+      'failed',
+      undefined,
+      {
+        phone: normalizedPhone,
+        provider_id: providerId,
+        provider_name: provider.full_name || provider.name,
+        error: callResult.error,
+        failure_type: 'immediate_api_failure',
+        call_type: 'provider_followup',
+      }
+    );
+
+    throw ApplicationFailure.nonRetryable(
+      `Provider call initiation failed: ${callResult.error}`,
+      'ProviderCallInitiationError'
+    );
+  }
+
+  console.log(`[Activity] Provider call initiated! conversation_id: ${callResult.conversationId}`);
+
+  // Store call record
+  const { error: insertError } = await supabase
+    .from('elevenlabs_calls')
+    .insert({
+      id: uuidv4(),
+      patient_case_id: patientCaseId,
+      workflow_id: workflowId,
+      conversation_id: callResult.conversationId,
+      call_sid: callResult.callSid,
+      to_number: normalizedPhone,
+      agent_id: agentId,
+      status: 'pending',
+      metadata: { provider_id: providerId, call_type: 'provider_followup' },
+    });
+
+  if (insertError) throw insertError;
+
+  // Log communication
+  await logCommunication(
+    patientCaseId,
+    'call',
+    'outbound',
+    'pending',
+    undefined,
+    {
+      conversation_id: callResult.conversationId,
+      call_sid: callResult.callSid,
+      phone: normalizedPhone,
+      provider_id: providerId,
+      provider_name: provider.full_name || provider.name,
+      call_type: 'provider_followup',
+    }
+  );
+
+  console.log(`[Activity] Provider call logged for ${provider.full_name || provider.name}`);
+  return callResult.conversationId!;
 }
 
 export async function collectTranscript(patientCaseId: number): Promise<string> {
