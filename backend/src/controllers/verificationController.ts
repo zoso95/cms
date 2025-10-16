@@ -155,6 +155,7 @@ export async function approveVerification(req: Request, res: Response) {
           console.log(`[VERIFICATION APPROVE] Sending signal with data:`, { faxNumber, email, otherContactInfo });
 
           await handle.signal('verificationComplete', true, {
+            verificationId: id, // Include verification ID so workflow knows which one was approved
             faxNumber,
             email,
             ...otherContactInfo
@@ -250,7 +251,10 @@ export async function rejectVerification(req: Request, res: Response) {
         try {
           const client = await getTemporalClient();
           const handle = client.workflow.getHandle(workflowExec.workflow_id);
-          await handle.signal('verificationComplete', false);
+          await handle.signal('verificationComplete', false, {
+            verificationId: id, // Include verification ID so workflow knows which one was rejected
+            rejection_reason: reason
+          });
           console.log(`✅ Sent verificationComplete (rejected) signal to workflow ${workflowExec.workflow_id}`);
         } catch (error: any) {
           console.error(`❌ Failed to send signal to workflow: ${error.message}`);
