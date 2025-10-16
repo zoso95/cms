@@ -5,6 +5,7 @@ const router = Router();
 
 // Patient cases
 router.post('/', patientController.createPatientCase);
+router.get('/all', patientController.getAllPatientCasesUnpaginated);
 router.get('/', patientController.getAllPatientCases);
 // Note: /patient-cases-with-workflows is registered in routes/index.ts (top level)
 router.get('/:id', patientController.getPatientCase);

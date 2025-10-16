@@ -65,27 +65,53 @@ export async function createPatientCase(req: Request, res: Response) {
 }
 
 /**
- * Get all patient cases with pagination
+ * Get all patient cases without pagination (for selectors/dropdowns)
+ */
+export async function getAllPatientCasesUnpaginated(req: Request, res: Response) {
+  try {
+    const { data, error } = await supabase
+      .from('patient_cases')
+      .select('id, first_name, last_name, email, phone, condition, state, incident_date, priority, status, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.json(data);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * Get all patient cases with pagination and optional search
  */
 export async function getAllPatientCases(req: Request, res: Response) {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = (page - 1) * limit;
+    const search = req.query.search as string;
+
+    // Build query
+    let countQuery = supabase.from('patient_cases').select('*', { count: 'exact', head: true });
+    let dataQuery = supabase.from('patient_cases').select('*').order('created_at', { ascending: false });
+
+    // Apply search filters if search query exists
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+
+      // Search across multiple fields
+      countQuery = countQuery.or(`first_name.ilike.${searchTerm},last_name.ilike.${searchTerm},phone.ilike.${searchTerm},condition.ilike.${searchTerm},email.ilike.${searchTerm},id.eq.${isNaN(parseInt(search)) ? 0 : parseInt(search)}`);
+      dataQuery = dataQuery.or(`first_name.ilike.${searchTerm},last_name.ilike.${searchTerm},phone.ilike.${searchTerm},condition.ilike.${searchTerm},email.ilike.${searchTerm},id.eq.${isNaN(parseInt(search)) ? 0 : parseInt(search)}`);
+    }
 
     // Get total count
-    const { count, error: countError } = await supabase
-      .from('patient_cases')
-      .select('*', { count: 'exact', head: true });
+    const { count, error: countError } = await countQuery;
 
     if (countError) throw countError;
 
     // Get paginated data
-    const { data, error } = await supabase
-      .from('patient_cases')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    const { data, error } = await dataQuery.range(offset, offset + limit - 1);
 
     if (error) throw error;
 

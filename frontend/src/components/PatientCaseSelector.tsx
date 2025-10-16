@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 
@@ -9,31 +9,30 @@ interface PatientCaseSelectorProps {
 
 export default function PatientCaseSelector({ onSelect, onCancel }: PatientCaseSelectorProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const limit = 50;
 
-  const { data: allPatientCasesResponse, isLoading } = useQuery({
-    queryKey: ['patient-cases-all'],
-    queryFn: () => api.getPatientCases(1, 10000), // Get all for search purposes
+  // Debounce search query to avoid too many API calls
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1); // Reset to first page when search changes
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Use server-side search
+  const { data: patientCasesResponse, isLoading } = useQuery({
+    queryKey: ['patient-cases-selector', page, debouncedSearch],
+    queryFn: () => api.getPatientCases(page, limit, debouncedSearch || undefined),
   });
 
-  const allPatientCases = allPatientCasesResponse?.data || [];
+  const patientCases = patientCasesResponse?.data || [];
+  const pagination = patientCasesResponse?.pagination;
 
-  // Filter patient cases based on search query
-  const filteredCases = allPatientCases?.filter((patientCase: any) => {
-    const query = searchQuery.toLowerCase();
-    const fullName = `${patientCase.first_name || ''} ${patientCase.last_name || ''}`.toLowerCase();
-    const phone = (patientCase.phone || '').toLowerCase();
-    const condition = (patientCase.condition || '').toLowerCase();
-    const id = patientCase.id.toString();
-
-    return (
-      fullName.includes(query) ||
-      phone.includes(query) ||
-      condition.includes(query) ||
-      id.includes(query)
-    );
-  });
-
-  if (isLoading) {
+  if (isLoading && !patientCases.length) {
     return (
       <div style={{
         position: 'fixed',
@@ -124,6 +123,11 @@ export default function PatientCaseSelector({ onSelect, onCancel }: PatientCaseS
               e.target.style.boxShadow = 'none';
             }}
           />
+          {pagination && (
+            <div style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.5rem' }}>
+              Showing {patientCases.length} of {pagination.total} patients
+            </div>
+          )}
         </div>
 
         {/* Patient Cases Table */}
@@ -156,61 +160,141 @@ export default function PatientCaseSelector({ onSelect, onCancel }: PatientCaseS
               </tr>
             </thead>
             <tbody>
-              {filteredCases?.length === 0 ? (
+              {isLoading && (
                 <tr>
                   <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#666', fontSize: '0.875rem' }}>
-                    No patient cases found matching "{searchQuery}"
+                    Searching...
                   </td>
                 </tr>
-              ) : (
-                filteredCases?.map((patientCase: any) => (
-                  <tr
-                    key={patientCase.id}
-                    style={{
-                      borderBottom: '1px solid #e5e5e5',
-                      cursor: 'pointer',
-                      transition: 'background-color 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f9fafb';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#fff';
-                    }}
-                    onClick={() => onSelect(patientCase.id)}
-                  >
-                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.id}</td>
-                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
-                      {patientCase.first_name} {patientCase.last_name}
-                    </td>
-                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.phone || 'N/A'}</td>
-                    <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.condition || 'N/A'}</td>
-                    <td style={{ padding: '0.75rem 1rem' }}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelect(patientCase.id);
-                        }}
-                        style={{
-                          padding: '0.25rem 0.75rem',
-                          borderRadius: '4px',
-                          border: 'none',
-                          backgroundColor: '#2563eb',
-                          color: '#fff',
-                          cursor: 'pointer',
-                          fontSize: '0.75rem',
-                          fontWeight: '500',
-                        }}
-                      >
-                        Select
-                      </button>
-                    </td>
-                  </tr>
-                ))
               )}
+              {!isLoading && patientCases.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#666', fontSize: '0.875rem' }}>
+                    {searchQuery ? `No patient cases found matching "${searchQuery}"` : 'No patient cases found'}
+                  </td>
+                </tr>
+              )}
+              {!isLoading && patientCases.map((patientCase: any) => (
+                <tr
+                  key={patientCase.id}
+                  style={{
+                    borderBottom: '1px solid #e5e5e5',
+                    cursor: 'pointer',
+                    transition: 'background-color 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#f9fafb';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fff';
+                  }}
+                  onClick={() => onSelect(patientCase.id)}
+                >
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.id}</td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
+                    {patientCase.first_name} {patientCase.last_name}
+                  </td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.phone || 'N/A'}</td>
+                  <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>{patientCase.condition || 'N/A'}</td>
+                  <td style={{ padding: '0.75rem 1rem' }}>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(patientCase.id);
+                      }}
+                      style={{
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '4px',
+                        border: 'none',
+                        backgroundColor: '#2563eb',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        fontSize: '0.75rem',
+                        fontWeight: '500',
+                      }}
+                    >
+                      Select
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        {pagination && pagination.totalPages > 1 && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '0.5rem',
+            marginBottom: '1.5rem',
+          }}>
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: '4px',
+                border: '1px solid #e5e5e5',
+                backgroundColor: page === 1 ? '#f3f4f6' : '#fff',
+                cursor: page === 1 ? 'not-allowed' : 'pointer',
+                fontSize: '0.875rem',
+                color: page === 1 ? '#9ca3af' : '#374151',
+              }}
+            >
+              Previous
+            </button>
+            <div style={{ display: 'flex', gap: '0.25rem' }}>
+              {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                let pageNum;
+                if (pagination.totalPages <= 5) {
+                  pageNum = i + 1;
+                } else if (page <= 3) {
+                  pageNum = i + 1;
+                } else if (page >= pagination.totalPages - 2) {
+                  pageNum = pagination.totalPages - 4 + i;
+                } else {
+                  pageNum = page - 2 + i;
+                }
+
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setPage(pageNum)}
+                    style={{
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '4px',
+                      border: '1px solid #e5e5e5',
+                      backgroundColor: page === pageNum ? '#2563eb' : '#fff',
+                      color: page === pageNum ? '#fff' : '#374151',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      fontWeight: page === pageNum ? '500' : '400',
+                    }}
+                  >
+                    {pageNum}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setPage(p => Math.min(pagination.totalPages, p + 1))}
+              disabled={page === pagination.totalPages}
+              style={{
+                padding: '0.5rem 0.75rem',
+                borderRadius: '4px',
+                border: '1px solid #e5e5e5',
+                backgroundColor: page === pagination.totalPages ? '#f3f4f6' : '#fff',
+                cursor: page === pagination.totalPages ? 'not-allowed' : 'pointer',
+                fontSize: '0.875rem',
+                color: page === pagination.totalPages ? '#9ca3af' : '#374151',
+              }}
+            >
+              Next
+            </button>
+          </div>
+        )}
 
         {/* Cancel Button */}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
